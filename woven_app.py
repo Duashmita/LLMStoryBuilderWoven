@@ -4,7 +4,7 @@ from dotenv import load_dotenv
 import os
 
 load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")
+client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # Session state setup
 if "story_state" not in st.session_state:
@@ -41,9 +41,9 @@ st.session_state.story_state["total_turns"] = turns
 st.session_state.story_state["turn_count"] = 0
 
 def final_print():
-    response = openai.ChatCompletion.create(
-        model="gpt-4o-mini",
-        message=[
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[
             {"role": "system", "content": f"""The story so far (summary): {', '.join(st.session_state.story_state['summary'])}.
         The main character is {st.session_state.story_state['name']}. The genre is {st.session_state.story_state['genre']}.
         {st.session_state.story_state['name']} is currently feeling {st.session_state.story_state['current_emotion']}, but the story will end with them feeling {st.session_state.story_state['target_emotion']}.
@@ -52,10 +52,10 @@ def final_print():
         Write the last paragraph of the story. Your response should be in this exact format:
         'the paragraph
         ~~~~
-        Then write a 20-word summary of the story so far.'"""}]
+        Then write a 20-word summary of the story so far.'"""}])
 
     # Get the story output
-    output = response.split("~~~~")
+    output = response.choices[0].message.content.split("~~~~")
     story_output = output[0]
     summary = output[2]
 
@@ -71,9 +71,9 @@ def final_print():
 
 def normal_print():
     while st.session_state.story_state["turn_count"] < st.session_state.story_state["total_turns"]-1:
-        response = openai.ChatCompletion.create(
-        model="gpt-4o-mini",
-        message=[
+        response = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[
             {"role": "system", "content": f"""The story so far (summary): {', '.join(st.session_state.story_state['summary'])}.
         The main character is {st.session_state.story_state['name']}. The genre is {st.session_state.story_state['genre']}.
         {st.session_state.story_state['name']} is currently feeling {st.session_state.story_state['current_emotion']}, but the story will end with them feeling {st.session_state.story_state['target_emotion']}.
@@ -84,10 +84,10 @@ def normal_print():
         ~~~~
         Then pose the choice as a question.
         ~~~~
-        Then write a 20-word summary of the story so far."""}]
+        Then write a 20-word summary of the story so far."""}])
 
         # Get the story output
-        output = response.split("~~~~")
+        output = response.choices[0].message.content.split("~~~~")
         story_output = output[0]
         question = output[1]
         summary = output[2]
@@ -108,10 +108,10 @@ if st.button("Submit"):
 
 for turn_count in range(st.session_state.story_state["total_turns"]):
     # Call OpenAI
-    response = openai.ChatCompletion.create(
-        model="gpt-4o-mini",
-        message=[
-            {"role": "system", "content": f"The story so far (summary): {', '.join(st.session_state.story_state['summary'])}.
+    response = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            {"role": "system", "content": f"""The story so far (summary): {', '.join(st.session_state.story_state['summary'])}.
         The main character is {st.session_state.story_state['name']}. The genre is {st.session_state.story_state['genre']}.
         {st.session_state.story_state['name']} are currently feeling {st.session_state.story_state['current_emotion']}, but the story will end with them feeling {st.session_state.story_state['target_emotion']}.
         Write the first paragraph of the story that ends with a new choice (action, path, or dialogue). Your response should be in this exact format:
@@ -119,10 +119,10 @@ for turn_count in range(st.session_state.story_state["total_turns"]):
         ~~~~
         Then pose the choice as a question.
         ~~~~
-        Then write a 20-word summary of the story so far."}])
+        Then write a 20-word summary of the story so far."""}])
 
     # Get the story output
-    output = response.split("~~~~")
+    output = response.choices[0].message.content.split("~~~~")
     story_output = output[0]
     question = output[1]
     summary = output[2]
@@ -135,7 +135,7 @@ for turn_count in range(st.session_state.story_state["total_turns"]):
     st.session_state.story_state["summary"].append(summary)
     st.session_state.story_state["turn_count"] += 1
 
-    normal_function()
+    normal_print()
 
 
 # st.markdown("---")
