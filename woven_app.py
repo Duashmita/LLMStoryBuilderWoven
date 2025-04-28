@@ -1,12 +1,15 @@
 import streamlit as st
-import openai
+from openai import OpenAI
 from dotenv import load_dotenv
 import os
 
-load_dotenv()
-client = openai.OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+load_dotenv(override=True)  # Add override=True
+api_key = os.getenv("OPENAI_API_KEY")
 
-# Session state setup
+# Initialize OpenAI client
+client = OpenAI(api_key=api_key)
+
+# Session state for tracking story progress and user input
 if "story_state" not in st.session_state:
     st.session_state.story_state = {
         "genre": None,
@@ -16,135 +19,154 @@ if "story_state" not in st.session_state:
         "summary": [],
         "turn_count": 0,
         "total_turns": 5,
-        "user_input": None
+        "started": False
     }
 
 st.title("🧶 Woven: into your story")
 
-# Create a container for the input fields
-input_container = st.container()
+# Only show the input form if the story hasn't started yet
+if not st.session_state.story_state["started"]:
+    with st.form(key="user_input_form"):
+        name = st.text_input("What is your name?")
+        genre = st.selectbox("Choose your genre", ["fantasy", "mystery", "dreamlike", "sci-fi", "horror", "romance", "comedy", "adventure"])
+        current_emotion = st.text_input("How do you feel right now?")
+        target_emotion = st.text_input("What do you want to feel?")
+        turns = st.slider("How many minutes do you have?", 2, 10, 5)
+        
+        submit_button = st.form_submit_button("Submit")
+        
+        if submit_button:
+            if name and genre and current_emotion and target_emotion:
+                st.session_state.story_state.update({
+                    "name": name,
+                    "current_emotion": current_emotion,
+                    "target_emotion": target_emotion,
+                    "genre": genre,
+                    "total_turns": turns,
+                    "turn_count": 0,
+                    "started": True
+                })
+                st.rerun()  # Updated from experimental_rerun to rerun
+            else:
+                st.error("Please fill out all fields before continuing.")
 
-# Let user set parameters
-with input_container:
-    name = st.text_input("What is your name?")
-    genre = st.selectbox("Choose your genre", ["fantasy", "mystery", "dreamlike", "sci-fi", "horror", "romance", "comedy", "adventure"])
-    current_emotion = st.text_input("How do you feel right now?")
-    target_emotion = st.text_input("What do you want to feel?")
-    turns = st.slider("How many minutes do you have?", 2, 10, 5)
-
-# Save to session state
-st.session_state.story_state["name"] = name
-st.session_state.story_state["current_emotion"] = current_emotion
-st.session_state.story_state["target_emotion"] = target_emotion
-st.session_state.story_state["genre"] = genre
-st.session_state.story_state["total_turns"] = turns
-st.session_state.story_state["turn_count"] = 0
-
-def final_print():
-    response = client.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=[
-            {"role": "system", "content": f"""The story so far (summary): {', '.join(st.session_state.story_state['summary'])}.
-        The main character is {st.session_state.story_state['name']}. The genre is {st.session_state.story_state['genre']}.
-        {st.session_state.story_state['name']} is currently feeling {st.session_state.story_state['current_emotion']}, but the story will end with them feeling {st.session_state.story_state['target_emotion']}.
-        So far, the story has been: {', '.join(st.session_state.story_state['summary'])}
-
-        Write the last paragraph of the story. Your response should be in this exact format:
-        'the paragraph
-        ~~~~
-        Then write a 20-word summary of the story so far.'"""}])
-
-    # Get the story output
-    output = response.choices[0].message.content.split("~~~~")
-    story_output = output[0]
-    summary = output[2]
-
-    # print the story output
-    st.write(story_output)
-    st.caption("The End!")
-
-    # Save the turn
-    st.session_state.story_state["summary"].append(summary)
-    st.session_state.story_state["turn_count"] += 1
-    st.stop()
-    
-
-def normal_print():
-    while st.session_state.story_state["turn_count"] < st.session_state.story_state["total_turns"]-1:
+# Function to call OpenAI API
+def openai_call(prompt):
+    try:
         response = client.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=[
-            {"role": "system", "content": f"""The story so far (summary): {', '.join(st.session_state.story_state['summary'])}.
-        The main character is {st.session_state.story_state['name']}. The genre is {st.session_state.story_state['genre']}.
-        {st.session_state.story_state['name']} is currently feeling {st.session_state.story_state['current_emotion']}, but the story will end with them feeling {st.session_state.story_state['target_emotion']}.
-        So far, the story has been: {', '.join(st.session_state.story_state['summary'])}
+            model="gpt-4o",
+            messages=[
+                {"role": "system", "content": "You are a creative storyteller."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=500
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        st.error(f"Error calling OpenAI API: {str(e)}")
+        return None
 
-        Write the next paragraph of the story that ends with a new choice (action, path, or dialogue). Your response should be in this exact format:
-        the paragraph
-        ~~~~
-        Then pose the choice as a question.
-        ~~~~
-        Then write a 20-word summary of the story so far."""}])
+# Function to build prompt based on story state
+def build_prompt(final=False):
+    base_summary = ", ".join(st.session_state.story_state['summary'])
+    name = st.session_state.story_state['name']
+    genre = st.session_state.story_state['genre']
+    current_emotion = st.session_state.story_state['current_emotion']
+    target_emotion = st.session_state.story_state['target_emotion']
 
-        # Get the story output
-        output = response.choices[0].message.content.split("~~~~")
-        story_output = output[0]
-        question = output[1]
-        summary = output[2]
+    if final:
+        return f"""
+The story so far: {base_summary}.
+Main character: {name}.
+Genre: {genre}.
+They feel {current_emotion} but will end feeling {target_emotion}.
 
-        # print the story output
+Write the LAST paragraph. Respond exactly like this:
+- The paragraph
+- ~~~~
+- 20-word story summary.
+"""
+    else:
+        return f"""
+The story so far: {base_summary}.
+Main character: {name}.
+Genre: {genre}.
+They feel {current_emotion} but will end feeling {target_emotion}.
+
+Write the NEXT paragraph ending with a CHOICE (action, path, dialogue). Respond exactly like this:
+- The paragraph
+- ~~~~
+- Pose the choice as a question
+- ~~~~
+- 20-word story summary.
+"""
+
+# Function to play a turn of the story
+def play_turn(final=False):
+    prompt = build_prompt(final=final)
+    raw_response = openai_call(prompt)
+    
+    if raw_response:
+        parts = raw_response.split("~~~~")
+
+        if len(parts) >= 3:
+            story_output = parts[0].strip()
+            question = parts[1].strip()
+            summary = parts[2].strip()
+        else:
+            story_output = raw_response.strip()
+            question = "What do you do next?"
+            summary = ""
+
         st.write(story_output)
-        st.caption(question)
+        if not final:
+            st.caption(question)
 
-        # Save the turn
-        st.session_state.story_state["summary"].append(summary)
-        st.session_state.story_state["turn_count"] += 1
+        if summary:
+            st.session_state.story_state['summary'].append(summary)
+        st.session_state.story_state['turn_count'] += 1
+        
+        # Add a placeholder for user input between turns
+        if not final:
+            user_choice = st.text_input("Your choice:", key=f"choice_{st.session_state.story_state['turn_count']}")
+            if user_choice:
+                st.session_state.story_state['summary'].append(f"{st.session_state.story_state['name']} chose: {user_choice}")
+                return True
+        return True
+    return False
 
-    final_print()
-
-if st.button("Submit"):
-    # Clear the input container
-    input_container.empty()
-
-for turn_count in range(st.session_state.story_state["total_turns"]):
-    # Call OpenAI
-    response = client.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=[
-            {"role": "system", "content": f"""The story so far (summary): {', '.join(st.session_state.story_state['summary'])}.
-        The main character is {st.session_state.story_state['name']}. The genre is {st.session_state.story_state['genre']}.
-        {st.session_state.story_state['name']} are currently feeling {st.session_state.story_state['current_emotion']}, but the story will end with them feeling {st.session_state.story_state['target_emotion']}.
-        Write the first paragraph of the story that ends with a new choice (action, path, or dialogue). Your response should be in this exact format:
-        the paragraph
-        ~~~~
-        Then pose the choice as a question.
-        ~~~~
-        Then write a 20-word summary of the story so far."""}])
-
-    # Get the story output
-    output = response.choices[0].message.content.split("~~~~")
-    story_output = output[0]
-    question = output[1]
-    summary = output[2]
-
-    # print the story output
-    st.write(story_output)
-    st.caption(question)
-
-    # Save the turn
-    st.session_state.story_state["summary"].append(summary)
-    st.session_state.story_state["turn_count"] += 1
-
-    normal_print()
-
-
-# st.markdown("---")
-# st.subheader("Your Story So Far:")
-
-# for turn in st.session_state.story_state["turns"]:
-#     st.markdown(f"**You:** {turn['user_input']}")
-#     st.markdown(f"*{turn['story_output']}*")
-
-# if st.session_state.story_state["turn_count"] >= st.session_state.story_state["chosen_turns"]:
-#     st.markdown("✨ **The story concludes...**")
-#     st.stop()
+# Story progression logic - only runs if the story has started
+if st.session_state.story_state["started"]:
+    # Display story header
+    st.header(f"{st.session_state.story_state['name']}'s {st.session_state.story_state['genre']} Story")
+    
+    # If this is a new story, start the first turn
+    if st.session_state.story_state["turn_count"] == 0:
+        play_turn()
+    
+    # If we've reached the end, play the final turn
+    elif st.session_state.story_state["turn_count"] >= st.session_state.story_state["total_turns"]:
+        if "completed" not in st.session_state.story_state or not st.session_state.story_state["completed"]:
+            play_turn(final=True)
+            st.session_state.story_state["completed"] = True
+            st.success("🌟 Story complete!")
+            
+            # Add reset button
+            if st.button("Start a new story"):
+                st.session_state.story_state = {
+                    "genre": None,
+                    "name": None,
+                    "current_emotion": None,
+                    "target_emotion": None,
+                    "summary": [],
+                    "turn_count": 0,
+                    "total_turns": 5,
+                    "started": False
+                }
+                st.rerun()  # Updated from experimental_rerun to rerun
+    
+    # Continue with the next turn if the user made a choice
+    elif "last_turn_completed" not in st.session_state.story_state or st.session_state.story_state["last_turn_completed"]:
+        turn_complete = play_turn()
+        st.session_state.story_state["last_turn_completed"] = not turn_complete
