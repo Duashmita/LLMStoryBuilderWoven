@@ -242,7 +242,7 @@ if not st.session_state.story_state["started"]:
         genre = st.selectbox("Choose your genre", list(GENRE_IMAGES.keys()))
         current_emotion = st.text_input("How do you feel right now?")
         target_emotion = st.text_input("What do you want to feel?")
-        turns = st.slider("How many minutes do you have?", 2, 10, 5)
+        turns = st.slider("How many minutes do you have?", 5, 20, 7)
         
         submit_button = st.form_submit_button("Submit")
         
