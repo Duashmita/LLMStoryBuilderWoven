@@ -65,8 +65,7 @@ def analyze_user_choice(choice, question):
         
     return st.session_state.story_state["user_preferences"]
 
-load_dotenv(override=True)
-api_key = os.getenv("OPENAI_API_KEY")
+api_key = st.secrets["openai_api_key"]
 
 # Initialize OpenAI client
 client = OpenAI(api_key=api_key)
