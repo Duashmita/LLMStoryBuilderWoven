@@ -479,6 +479,9 @@ if st.session_state.story_state["started"]:
             st.session_state.story_state["completed"] = True
             st.success("🌟 Story complete!")
             
+            st.markdown("### We'd love your feedback 💬")
+            if st.button("Leave Feedback"):
+                st.markdown('<meta http-equiv="refresh" content="0;url=https://7umut23yse8.typeform.com/to/bSuQeV0L">',unsafe_allow_html=True,)
             # Add reset button
             if st.button("Start a new story"):
                 st.session_state.story_state = {
