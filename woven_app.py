@@ -2,6 +2,7 @@ import streamlit as st
 from openai import OpenAI
 from dotenv import load_dotenv
 import os
+import time
 
 # Function to analyze user choice and update preferences
 def analyze_user_choice(choice, question):
@@ -264,25 +265,27 @@ if not st.session_state.story_state["started"]:
             else:
                 st.error("Please fill out all fields before continuing.")
 
-# Function to call OpenAI API
 def openai_call(prompt):
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o",
-            messages=[
-                {"role": "system", "content": """You are a creative storyteller who writes in a clear, 
-                engaging style. Use simple, direct language that's fun to read. Keep sentences short. 
-                Use active voice and strong verbs. Avoid complex vocabulary in favor of familiar, 
-                vivid words. Make your writing colorful and interesting while remaining easy to understand."""},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.7,
-            max_tokens=500
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        st.error(f"Error calling OpenAI API: {str(e)}")
-        return None
+    retries = 3
+    for attempt in range(retries):
+        try:
+            response = openai.ChatCompletion.create(
+                model="gpt-4o",
+                messages=[
+                    {"role": "system", "content": "You're a creative storyteller..."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.7,
+                max_tokens=500
+            )
+            return response.choices[0].message["content"]
+        except Exception as e:
+            if "429" in str(e) and attempt < retries - 1:
+                wait_time = 2 ** attempt
+                time.sleep(wait_time)
+            else:
+                st.error(f"Error calling OpenAI API: {str(e)}")
+                return None
 
 # Function to build prompt based on story state
 def build_prompt(final=False):
