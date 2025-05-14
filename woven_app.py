@@ -235,7 +235,7 @@ st.title("🧶 Woven: into your story")
 # Only show the input form if the story hasn't started yet
 if not st.session_state.story_state["started"]:
     # Default background for start screen
-    set_background("https://images.unsplash.com/photo-1518709268805-4e9042af9f23")
+    set_background("https://images.unsplash.com/photo-1518709268805-4e9042af9f23") # ! CHANGE IT PLEASE
     
     with st.form(key="user_input_form"):
         name = st.text_input("What is your name?")
@@ -358,6 +358,7 @@ Write the FINAL part of the story:
 - Don't explicitly state the emotion - show it through the character's reactions, sensations, and thoughts
 - Keep it short and powerful
 - End with a sense of resolution or new beginning that feels earned
+- Use simple yet powerfull words
 
 Structure:
 - short paragraph
@@ -367,7 +368,7 @@ Structure:
     elif approaching_climax:
         return f"""
 Story so far: {base_summary}
-You are {name}.
+Main Character is {name}.
 World: {genre}.
 The character began feeling {current_emotion} and is approaching a pivotal moment that will lead to experiencing {target_emotion}.
 
@@ -409,7 +410,7 @@ Write the next part of the story:
 - Include meaningful dialogue that reveals character and advances the emotional journey
 - Tailor the scene to align with the character's established preferences and tendencies
 - End with a MEANINGFUL CHOICE that:
-  * Presents two clearly different paths with emotional consequences
+  * Presents two clearly different paths with different emotional consequences
   * Makes one path align more with staying in {current_emotion} and the other with movement toward {target_emotion}
   * Forces the player to choose between comfort/familiarity vs. growth/change
   * Has real stakes that will impact the story's direction
