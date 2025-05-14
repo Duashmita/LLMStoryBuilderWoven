@@ -1,5 +1,5 @@
 import streamlit as st
-from openai import OpenAI
+import openai
 from dotenv import load_dotenv
 import os
 import time
@@ -69,7 +69,7 @@ def analyze_user_choice(choice, question):
 api_key = st.secrets["openai_api_key"]
 
 # Initialize OpenAI client
-client = OpenAI(api_key=api_key)
+openai.api_key = api_key
 
 # Session state for tracking story progress and user input
 if "story_state" not in st.session_state:
