@@ -1,5 +1,5 @@
 import streamlit as st
-import openai
+from openai import OpenAI
 from dotenv import load_dotenv
 import os
 import time
@@ -69,7 +69,7 @@ def analyze_user_choice(choice, question):
 api_key = st.secrets["openai_api_key"]
 
 # Initialize OpenAI client
-openai.api_key = api_key
+client = OpenAI(api_key=st.secrets["openai_api_key"])
 
 # Session state for tracking story progress and user input
 if "story_state" not in st.session_state:
@@ -269,16 +269,16 @@ def openai_call(prompt):
     retries = 3
     for attempt in range(retries):
         try:
-            response = openai.ChatCompletion.create(
+            response = client.chat.completions.create(
                 model="gpt-4o",
                 messages=[
-                    {"role": "system", "content": "You're a creative storyteller..."},
+                    {"role": "system", "content": "You are a creative storyteller..."},
                     {"role": "user", "content": prompt}
                 ],
                 temperature=0.7,
                 max_tokens=500
             )
-            return response.choices[0].message["content"]
+            return response.choices[0].message.content
         except Exception as e:
             if "429" in str(e) and attempt < retries - 1:
                 wait_time = 2 ** attempt
