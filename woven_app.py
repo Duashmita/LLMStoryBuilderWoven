@@ -8,6 +8,12 @@ from datetime import datetime
 import pandas as pd
 from supabase import create_client, Client
 
+def init_supabase():
+    """Initialize Supabase client"""
+    url = st.secrets["supabase"]["url"]
+    key = st.secrets["supabase"]["key"]
+    return create_client(url, key)
+
 # Function to analyze user choice and update preferences
 def analyze_user_choice(choice, question):
     """Analyze user's choice to update their preference profile"""
@@ -634,12 +640,6 @@ IMPORTANT: Each personality score must be on its own line and follow the exact f
 """
 
 # Add this after the imports
-def init_supabase():
-    """Initialize Supabase client"""
-    url = st.secrets["supabase"]["url"]
-    key = st.secrets["supabase"]["key"]
-    return create_client(url, key)
-
 def save_emotional_data(story_data):
     """Save emotional data to Supabase"""
     supabase = init_supabase()
