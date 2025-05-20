@@ -385,11 +385,11 @@ if not st.session_state.story_state["started"]:
         # Story length selection
         story_length = st.radio(
             "How long do you want your story to be?",
-            ["Short (approx. 10 turns)", "Long (up to 25 turns, aims for target emotion)"],
+            ["Short (approx. 10 turns)", "Long (up to 17 turns, aims for target emotion)"],
             index=0,
             help="Select 'Long' for a better experience with emotional arc validation."
         )
-        turns_map = {"Short (approx. 10 turns)": 10, "Long (up to 25 turns, aims for target emotion)": 25}
+        turns_map = {"Short (approx. 10 turns)": 10, "Long (up to 17 turns, Has better results)": 17}
         turns = turns_map[story_length]
         
         # Optional email input for research updates
@@ -964,7 +964,7 @@ def play_turn(final=False):
     total_turns = story_state["total_turns"]
     
     # Determine if this turn should be final based on reaching target emotion (for Long stories)
-    is_final_turn = final or (story_state.get("story_length_option") == "Long (up to 25 turns, aims for target emotion)" and story_state.get("character_mood", "").lower() == story_state["target_emotion"].lower() and current_turn >= story_state["total_turns"] // 2)
+    is_final_turn = final or (story_state.get("story_length_option") == "Long (up to 17 turns, aims for target emotion)" and story_state.get("character_mood", "").lower() == story_state["target_emotion"].lower() and current_turn >= story_state["total_turns"] // 2)
 
     # Build the prompt
     prompt = build_prompt(final=is_final_turn)
