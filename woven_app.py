@@ -716,13 +716,32 @@ def save_validation_data(story_id, arc_right, comments):
 def display_emotional_analytics():
     """Display real-time analytics of emotional data and allow user validation"""
     if st.session_state.story_state.get("completed", False):
-        supabase = init_supabase()
-        result = supabase.table('emotional_data')\
-            .select('*, stories(name, genre)')\
-            .eq('stories.name', st.session_state.story_state["name"])\
-            .order('turn_number')\
-            .execute()
-        if result.data:
+        try:
+            supabase = init_supabase()
+            
+            # First get the story ID
+            story_result = supabase.table('stories')\
+                .select('id')\
+                .eq('name', st.session_state.story_state["name"])\
+                .execute()
+                
+            if not story_result.data:
+                st.error("Could not find story data. Please try again.")
+                return
+                
+            story_id = story_result.data[0]['id']
+            
+            # Then get the emotional data for this story
+            result = supabase.table('emotional_data')\
+                .select('turn_number, character_mood, user_mood, story_summary, question, personality_scores, story_phase, is_final, timestamp')\
+                .eq('story_id', story_id)\
+                .order('turn_number')\
+                .execute()
+                
+            if not result.data:
+                st.error("No emotional data found for this story.")
+                return
+                
             df = pd.DataFrame(result.data)
             st.subheader("Emotional Journey Analytics")
             mood_wheel = [
@@ -734,6 +753,10 @@ def display_emotional_analytics():
             
             # Filter out None values and clean up mood strings
             df = df[df['character_mood'].notna() & df['user_mood'].notna()]
+            
+            if df.empty:
+                st.error("No valid mood data found for analysis.")
+                return
             
             # Clean up mood strings by removing any extra text and standardizing case
             def clean_mood(mood):
@@ -753,6 +776,10 @@ def display_emotional_analytics():
             
             # Remove rows where moods couldn't be cleaned
             df = df[df['character_mood'].notna() & df['user_mood'].notna()]
+            
+            if df.empty:
+                st.error("No valid mood data found after cleaning.")
+                return
             
             # Map moods to numbers for plotting
             df['character_mood_num'] = df['character_mood'].map(lambda m: mood_to_num.get(m, None))
@@ -805,19 +832,15 @@ def display_emotional_analytics():
                 submit_validation = st.form_submit_button('Submit Validation')
                 
                 if submit_validation:
-                    # Get the story_id
-                    story_result = supabase.table('stories')\
-                        .select('id')\
-                        .eq('name', st.session_state.story_state["name"])\
-                        .execute()
-                    if story_result.data:
-                        story_id = story_result.data[0]['id']
+                    try:
                         # Save validation data
                         save_validation_data(story_id, arc_right, comments)
                         if arc_right == 'No':
                             st.info(f'Thank you for your feedback! Your comments: {comments}')
                         else:
                             st.success('Great! Your validation helps us improve.')
+                    except Exception as e:
+                        st.error(f"Error saving validation: {str(e)}")
 
             # --- MOOD PROGRESSION PLOT ---
             tab1, tab2, tab3 = st.tabs(["Mood Progression", "Personality Changes", "Story Phases"])
@@ -852,6 +875,10 @@ def display_emotional_analytics():
             with tab3:
                 phase_counts = df['story_phase'].value_counts()
                 st.bar_chart(phase_counts)
+                
+        except Exception as e:
+            st.error(f"Error displaying analytics: {str(e)}")
+            return
 
 def save_research_email(story_id, email):
     """Save research email to Supabase"""
