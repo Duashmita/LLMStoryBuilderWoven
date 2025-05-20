@@ -642,40 +642,63 @@ IMPORTANT: Each personality score must be on its own line and follow the exact f
 # Add this after the imports
 def save_emotional_data(story_data):
     """Save emotional data to Supabase"""
-    supabase = init_supabase()
-    
-    # If this is the first turn, create a new story entry
-    if story_data["turn_number"] == 1:
-        story_meta = {
-            "name": st.session_state.story_state["name"],
-            "genre": st.session_state.story_state["genre"],
-            "total_turns": st.session_state.story_state["total_turns"],
-            "start_time": datetime.now().isoformat(),
-            "research_email": st.session_state.story_state.get("research_email")  # Save research email
+    try:
+        supabase = init_supabase()
+        
+        # If this is the first turn, create a new story entry
+        if story_data["turn_number"] == 1:
+            story_meta = {
+                "name": st.session_state.story_state["name"],
+                "genre": st.session_state.story_state["genre"],
+                "total_turns": st.session_state.story_state["total_turns"],
+                "start_time": datetime.now().isoformat(),
+                "research_email": st.session_state.story_state.get("research_email")
+            }
+            try:
+                result = supabase.table('stories').insert(story_meta).execute()
+                if not result.data:
+                    st.error("Failed to create story entry. Please check your database connection.")
+                    return
+                story_id = result.data[0]['id']
+            except Exception as e:
+                st.error(f"Error creating story entry: {str(e)}")
+                return
+        else:
+            try:
+                # Get the latest story_id
+                result = supabase.table('stories').select('id').order('id', desc=True).limit(1).execute()
+                if not result.data:
+                    st.error("Could not find story ID. Please check your database connection.")
+                    return
+                story_id = result.data[0]['id']
+            except Exception as e:
+                st.error(f"Error retrieving story ID: {str(e)}")
+                return
+        
+        # Prepare emotional data
+        emotional_data = {
+            "story_id": story_id,
+            "turn_number": story_data["turn_number"],
+            "character_mood": story_data["character_mood"],
+            "user_mood": story_data["user_mood"],
+            "story_summary": story_data["story_summary"],
+            "question": story_data["question"],
+            "personality_scores": json.dumps(story_data["personality_scores"]),
+            "story_phase": story_data["story_phase"],
+            "is_final": story_data["is_final"],
+            "timestamp": datetime.now().isoformat()
         }
-        result = supabase.table('stories').insert(story_meta).execute()
-        story_id = result.data[0]['id']
-    else:
-        # Get the latest story_id
-        result = supabase.table('stories').select('id').order('id', desc=True).limit(1).execute()
-        story_id = result.data[0]['id']
-    
-    # Prepare emotional data
-    emotional_data = {
-        "story_id": story_id,
-        "turn_number": story_data["turn_number"],
-        "character_mood": story_data["character_mood"],
-        "user_mood": story_data["user_mood"],
-        "story_summary": story_data["story_summary"],
-        "question": story_data["question"],
-        "personality_scores": json.dumps(story_data["personality_scores"]),
-        "story_phase": story_data["story_phase"],
-        "is_final": story_data["is_final"],
-        "timestamp": datetime.now().isoformat()
-    }
-    
-    # Insert emotional data
-    supabase.table('emotional_data').insert(emotional_data).execute()
+        
+        # Insert emotional data
+        try:
+            supabase.table('emotional_data').insert(emotional_data).execute()
+        except Exception as e:
+            st.error(f"Error saving emotional data: {str(e)}")
+            return
+            
+    except Exception as e:
+        st.error(f"Unexpected error in save_emotional_data: {str(e)}")
+        return
 
 def save_validation_data(story_id, arc_right, comments):
     """Save validation data to Supabase"""
