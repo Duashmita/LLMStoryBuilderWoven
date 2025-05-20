@@ -7,12 +7,21 @@ import json
 from datetime import datetime
 import pandas as pd
 from supabase import create_client, Client
+from emotional_validator import EmotionalValidator
 
 def init_supabase():
     """Initialize Supabase client"""
-    url = st.secrets["supabase"]["url"]
-    key = st.secrets["supabase"]["key"]
-    return create_client(url, key)
+    try:
+        url = st.secrets["supabase"]["url"]
+        key = st.secrets["supabase"]["key"]
+        st.write("Debug - Supabase URL:", url)  # Debug log
+        st.write("Debug - Supabase key length:", len(key))  # Debug log (showing length for security)
+        client = create_client(url, key)
+        st.write("Debug - Supabase client created successfully")  # Debug log
+        return client
+    except Exception as e:
+        st.error(f"Error initializing Supabase: {str(e)}")
+        raise
 
 def save_research_email(story_id, email):
     """Save research email to Supabase"""
@@ -22,7 +31,9 @@ def save_research_email(story_id, email):
 def save_emotional_data(story_data):
     """Save emotional data to Supabase"""
     try:
+        st.write("Debug - Starting save_emotional_data")  # Debug log
         supabase = init_supabase()
+        st.write("Debug - Supabase client initialized")  # Debug log
         
         # If this is the first turn, create a new story entry
         if story_data["turn_number"] == 1:
@@ -33,25 +44,33 @@ def save_emotional_data(story_data):
                 "start_time": datetime.now().isoformat(),
                 "research_email": st.session_state.story_state.get("research_email")
             }
+            st.write("Debug - Creating new story entry:", story_meta)
             try:
                 result = supabase.table('stories').insert(story_meta).execute()
+                st.write("Debug - Insert result:", result)  # Debug log
                 if not result.data:
                     st.error("Failed to create story entry. Please check your database connection.")
                     return
                 story_id = result.data[0]['id']
+                st.write("Debug - New story created with ID:", story_id)
             except Exception as e:
                 st.error(f"Error creating story entry: {str(e)}")
+                st.write("Debug - Full error details:", e.__dict__)  # Debug log
                 return
         else:
             try:
                 # Get the latest story_id
+                st.write("Debug - Fetching latest story ID")  # Debug log
                 result = supabase.table('stories').select('id').order('id', desc=True).limit(1).execute()
+                st.write("Debug - Fetch result:", result)  # Debug log
                 if not result.data:
                     st.error("Could not find story ID. Please check your database connection.")
                     return
                 story_id = result.data[0]['id']
+                st.write("Debug - Retrieved story ID:", story_id)
             except Exception as e:
                 st.error(f"Error retrieving story ID: {str(e)}")
+                st.write("Debug - Full error details:", e.__dict__)  # Debug log
                 return
         
         # Prepare emotional data
@@ -68,15 +87,22 @@ def save_emotional_data(story_data):
             "timestamp": datetime.now().isoformat()
         }
         
+        st.write("Debug - Saving emotional data:", emotional_data)
+        
         # Insert emotional data
         try:
-            supabase.table('emotional_data').insert(emotional_data).execute()
+            st.write("Debug - Attempting to insert emotional data")  # Debug log
+            result = supabase.table('emotional_data').insert(emotional_data).execute()
+            st.write("Debug - Insert result:", result)  # Debug log
+            st.write("Debug - Emotional data saved successfully:", result.data)
         except Exception as e:
             st.error(f"Error saving emotional data: {str(e)}")
+            st.write("Debug - Full error details:", e.__dict__)  # Debug log
             return
             
     except Exception as e:
         st.error(f"Unexpected error in save_emotional_data: {str(e)}")
+        st.write("Debug - Full error details:", e.__dict__)  # Debug log
         return
 
 def save_validation_data(story_id, arc_right, comments):
@@ -160,6 +186,9 @@ genai.configure(api_key=api_key)
 # Initialize Gemini client
 model = genai.GenerativeModel('gemini-2.0-flash-lite-preview')
 
+# Initialize the emotional validator
+emotional_validator = EmotionalValidator()
+
 # Session state for tracking story progress and user input
 if "story_state" not in st.session_state:
     st.session_state.story_state = {
@@ -171,10 +200,10 @@ if "story_state" not in st.session_state:
         "target_emotion": None,
         "summary": [],
         "turn_count": 0,
-        "total_turns": 5,
+        "total_turns": 10, # Default to short
         "started": False,
-        "character_mood": None,  # Track character's current mood
-        "user_mood": None,      # Track user's current mood
+        "character_mood": None,  # Track character's current mood (will be replaced by arc)
+        "user_mood": None,      # Track user's current mood (will be replaced by arc)
         "last_user_input": None,  # Add field to store last user input
         "user_preferences": {
             "risk_taker": 0,       # -5 to 5 scale (cautious to adventurous)
@@ -183,7 +212,10 @@ if "story_state" not in st.session_state:
             "analytical": 0,       # -5 to 5 scale (intuitive to analytical)
             "fantasy_interest": 0, # -5 to 5 scale (realistic to fantastical)
             "introspective": 0     # -5 to 5 scale (action-oriented to introspective)
-        }
+        },
+        "character_mood_arc": {}, # Store character moods by turn
+        "user_mood_arc": {},      # Store user moods by turn
+        "validation_errors": {}   # Store validation errors by turn
     }
 
 # Add this to store all paragraphs
@@ -353,10 +385,11 @@ if not st.session_state.story_state["started"]:
         # Story length selection
         story_length = st.radio(
             "How long do you want your story to be?",
-            ["Short", "Medium", "Long"],
-            index=1
+            ["Short (approx. 10 turns)", "Long (up to 25 turns, aims for target emotion)"],
+            index=0,
+            help="Select 'Long' for a better experience with emotional arc validation."
         )
-        turns_map = {"Short": 5, "Medium": 10, "Long": 15}
+        turns_map = {"Short (approx. 10 turns)": 10, "Long (up to 25 turns, aims for target emotion)": 25}
         turns = turns_map[story_length]
         
         # Optional email input for research updates
@@ -375,7 +408,18 @@ if not st.session_state.story_state["started"]:
                     "genre": genre,
                     "total_turns": turns,
                     "turn_count": 0,
-                    "started": True
+                    "started": True,
+                    "user_preferences": {
+                        "risk_taker": 0,
+                        "optimism": 0,
+                        "social": 0,
+                        "analytical": 0,
+                        "fantasy_interest": 0,
+                        "introspective": 0
+                    },
+                    "character_mood_arc": {},
+                    "user_mood_arc": {},
+                    "validation_errors": {}
                 })
                 # Clear any existing paragraphs when starting a new story
                 st.session_state.story_paragraphs = []
@@ -520,6 +564,22 @@ def build_prompt(final=False):
 
     genre_reinforce = f"This is a {genre} story."
 
+    # Define allowed emotions
+    allowed_emotions = """
+IMPORTANT - You must use ONLY these 10 emotions for character and user moods:
+1. joy (happiness, delight)
+2. sadness (grief, sorrow)
+3. anger (rage, frustration)
+4. fear (anxiety, terror)
+5. trust (confidence, faith)
+6. surprise (amazement, wonder)
+7. anticipation (expectation, hope)
+8. disgust (aversion, repulsion)
+9. neutral (balanced, calm)
+10. confusion (uncertainty, doubt)
+
+When describing moods, use ONLY these exact emotion words."""
+
     if final:
         return f"""
 {genre_reinforce}
@@ -535,6 +595,8 @@ Character insights based on their choices:
 Current personality scores:
 {personality_scores}
 
+{allowed_emotions}
+
 Write the FINAL part of the story:
 - Create a powerful emotional breakthrough moment that finally allows the character to fully experience {target_emotion}
 - This should be a specific, concrete event (not just an internal realization)
@@ -545,7 +607,7 @@ Write the FINAL part of the story:
 - Keep it short and powerful
 - End with a sense of resolution or new beginning that feels earned
 - Use simple yet powerful words
-- Use the correct pronouns ({pronouns}) throughout the story
+- Use the correct pronouns ({pronouns})
 - Acknowledge and build upon the user's last response in the story
 
 Structure:
@@ -553,9 +615,9 @@ Structure:
 - ~~~~
 - 20-word story summary
 - ~~~~
-- Current character mood: [describe the character's emotional state in one word, using the emotional wheel]
+- Current character mood: [MUST be one of the 10 allowed emotions]
 - ~~~~
-- Current user mood: [describe how the user might be feeling based on their choices in one word, using the emotional wheel]
+- Current user mood: [MUST be one of the 10 allowed emotions]
 - ~~~~
 - Updated personality scores: [list each score on a new line in the format "Trait Name: X/5"]
 Example personality scores format:
@@ -583,6 +645,8 @@ Character insights based on their choices:
 Current personality scores:
 {personality_scores}
 
+{allowed_emotions}
+
 Write the next part of the story:
 - Set up the conditions for an emotional breakthrough in the next turn
 - Create a situation that challenges the character's current perspective
@@ -592,7 +656,7 @@ Write the next part of the story:
 - {'Include subtle fantasy elements if they enhance the emotional journey' if use_fantasy else 'Keep the narrative grounded in human experience with a touch of wonder'}
 - Add meaningful dialogue that reveals something important
 - Tailor this part to align with the character's established preferences and tendencies
-- Use the correct pronouns ({pronouns}) throughout the story
+- Use the correct pronouns ({pronouns})
 - Acknowledge and build upon the user's last response in the story
 - End with either:
   * A meaningful situation that forces the character to make a significant choice
@@ -611,9 +675,9 @@ Structure:
 - ~~~~
 - 20-word story summary
 - ~~~~
-- Current character mood: [describe the character's emotional state in one word, using the emotional wheel]
+- Current character mood: [MUST be one of the 10 allowed emotions]
 - ~~~~
-- Current user mood: [describe how the user might be feeling based on their choices in one word, using the emotional wheel]
+- Current user mood: [MUST be one of the 10 allowed emotions]
 - ~~~~
 - Updated personality scores: [list each score on a new line in the format "Trait Name: X/5"]
 Example personality scores format:
@@ -682,6 +746,8 @@ Character insights based on their choices so far:
 Current personality scores:
 {personality_scores}
 
+{allowed_emotions}
+
 Write the next part of the story:
 - Show subtle shifts in the character's emotional state through their perceptions and actions
 - Don't explicitly mention the target emotion - create situations that move toward it indirectly
@@ -701,9 +767,9 @@ Structure:
 - ~~~~
 - 20-word story summary
 - ~~~~
-- Current character mood: [describe the character's emotional state in one word, using the emotional wheel]
+- Current character mood: [MUST be one of the 10 allowed emotions]
 - ~~~~
-- Current user mood: [describe how the user might be feeling based on their choices in one word, using the emotional wheel]
+- Current user mood: [MUST be one of the 10 allowed emotions]
 - ~~~~
 - Updated personality scores: [list each score on a new line in the format "Trait Name: X/5"]
 Example personality scores format:
@@ -720,174 +786,188 @@ IMPORTANT: Each personality score must be on its own line and follow the exact f
 # Function to display emotional analytics
 def display_emotional_analytics():
     """Display real-time analytics of emotional data and allow user validation"""
-    if st.session_state.story_state.get("completed", False):
-        try:
-            supabase = init_supabase()
-            
-            # First get the story ID
-            story_result = supabase.table('stories')\
-                .select('id')\
-                .eq('name', st.session_state.story_state["name"])\
-                .execute()
-                
-            if not story_result.data:
-                st.error("Could not find story data. Please try again.")
-                return
-                
-            story_id = story_result.data[0]['id']
-            
-            # Then get the emotional data for this story
-            result = supabase.table('emotional_data')\
-                .select('turn_number, character_mood, user_mood, story_summary, question, personality_scores, story_phase, is_final, timestamp')\
-                .eq('story_id', story_id)\
-                .order('turn_number')\
-                .execute()
-                
-            if not result.data:
-                st.error("No emotional data found for this story.")
-                return
-                
-            df = pd.DataFrame(result.data)
-            st.subheader("Emotional Journey Analytics")
-            mood_wheel = [
-                'ecstatic', 'joyful', 'happy', 'content', 'calm', 'relieved', 'curious', 'interested', 'intrigued',
-                'neutral', 'weary', 'sad', 'angry', 'afraid', 'disgusted', 'surprised', 'trusting', 'anticipating'
-            ]
-            mood_to_num = {mood: i for i, mood in enumerate(mood_wheel)}
-            num_to_mood = {i: mood for i, mood in enumerate(mood_wheel)}
-            
-            # Filter out None values and clean up mood strings
-            df = df[df['character_mood'].notna() & df['user_mood'].notna()]
-            
-            if df.empty:
-                st.error("No valid mood data found for analysis.")
-                return
-            
-            # Clean up mood strings by removing any extra text and standardizing case
-            def clean_mood(mood):
-                if not isinstance(mood, str):
-                    return None
-                # Remove any text after "Current" or "Updated"
-                mood = mood.split('Current')[0].split('Updated')[0].strip()
-                # Remove any personality scores
-                mood = mood.split('Risk taker')[0].strip()
-                # Convert to lowercase for consistency
-                mood = mood.lower()
-                # Only keep if it's a valid mood
-                return mood if mood in mood_wheel else None
-            
-            df['character_mood'] = df['character_mood'].apply(clean_mood)
-            df['user_mood'] = df['user_mood'].apply(clean_mood)
-            
-            # Remove rows where moods couldn't be cleaned
-            df = df[df['character_mood'].notna() & df['user_mood'].notna()]
-            
-            if df.empty:
-                st.error("No valid mood data found after cleaning.")
-                return
-            
-            # Map moods to numbers for plotting
-            df['character_mood_num'] = df['character_mood'].map(lambda m: mood_to_num.get(m, None))
-            df['user_mood_num'] = df['user_mood'].map(lambda m: mood_to_num.get(m, None))
+    # Only display analytics if the story is completed
+    if not st.session_state.story_state.get("completed", False):
+        return
 
-            # --- MOOD ARC VALIDATION ---
-            st.markdown('#### Mood Arc Validation')
-            
-            # Define significant mood changes (e.g., positive to negative, or major intensity changes)
-            def is_significant_change(mood1, mood2):
-                if not mood1 or not mood2:
-                    return False
-                # Get mood indices
-                idx1 = mood_wheel.index(mood1)
-                idx2 = mood_wheel.index(mood2)
-                # Consider it significant if it's more than 3 positions away on the wheel
-                return abs(idx1 - idx2) > 3
-            
-            # Filter for significant mood changes
-            filtered_character_moods = []
-            last_char_mood = None
-            for mood in df['character_mood']:
-                if not last_char_mood or is_significant_change(last_char_mood, mood):
-                    filtered_character_moods.append(mood.capitalize())
-                    last_char_mood = mood
-                    
-            filtered_user_moods = []
-            last_user_mood = None
-            for mood in df['user_mood']:
-                if not last_user_mood or is_significant_change(last_user_mood, mood):
-                    filtered_user_moods.append(mood.capitalize())
-                    last_user_mood = mood
+    st.subheader("Emotional Journey Analytics")
 
-            # Ensure we have at least the first and last mood
-            if filtered_character_moods and df['character_mood'].iloc[-1] not in filtered_character_moods:
-                filtered_character_moods.append(df['character_mood'].iloc[-1].capitalize())
-            if filtered_user_moods and df['user_mood'].iloc[-1] not in filtered_user_moods:
-                filtered_user_moods.append(df['user_mood'].iloc[-1].capitalize())
+    story_state = st.session_state.story_state
+    character_mood_arc = story_state.get("character_mood_arc", {})
+    user_mood_arc = story_state.get("user_mood_arc", {})
+    validation_errors = story_state.get("validation_errors", {})
+    target_emotion = story_state.get("target_emotion", "neutral").lower()
+    total_turns = story_state.get("total_turns", 10) # Use total_turns for scaling ideal arc
 
-            character_arc_display = ' → '.join(filtered_character_moods)
-            user_arc_display = ' → '.join(filtered_user_moods)
-            
-            st.markdown(f"**Character Mood Arc:** {character_arc_display}")
-            st.markdown(f"**Your Mood Arc (Model Interpretation):** {user_arc_display}")
-            
-            with st.form(key='mood_arc_validation_form'):
-                st.markdown('**Does this sequence of moods feel correct?**')
-                arc_right = st.radio('Select validation:', ['Yes', 'No'], key='arc_right', label_visibility="collapsed")
-                comments = st.text_area('Optional comments:', key='arc_validation_comments')
-                submit_validation = st.form_submit_button('Submit Validation')
-                
-                if submit_validation:
-                    try:
-                        # Save validation data
-                        save_validation_data(story_id, arc_right, comments)
-                        if arc_right == 'No':
-                            st.info(f'Thank you for your feedback! Your comments: {comments}')
-                        else:
-                            st.success('Great! Your validation helps us improve.')
-                    except Exception as e:
-                        st.error(f"Error saving validation: {str(e)}")
+    if not character_mood_arc and not user_mood_arc:
+        st.error("No emotional data found for this story.")
+        return
 
-            # --- MOOD PROGRESSION PLOT ---
-            tab1, tab2, tab3 = st.tabs(["Mood Progression", "Personality Changes", "Story Phases"])
-            with tab1:
-                import plotly.graph_objects as go
-                fig = go.Figure()
-                fig.add_trace(go.Scatter(
-                    x=df['turn_number'],
-                    y=df['character_mood_num'],
-                    mode='lines+markers',
-                    name='Character Mood',
-                    text=df['character_mood'],
-                    hovertemplate='Character: %{text}<br>Turn %{x}'
-                ))
-                fig.add_trace(go.Scatter(
-                    x=df['turn_number'],
-                    y=df['user_mood_num'],
-                    mode='lines+markers',
-                    name='User Mood (Model)',
-                    text=df['user_mood'],
-                    hovertemplate='User: %{text}<br>Turn %{x}'
-                ))
-                fig.update_yaxes(
-                    tickvals=list(num_to_mood.keys()),
-                    ticktext=list(num_to_mood.values())
-                )
-                fig.update_layout(title='Mood Progression', xaxis_title='Turn', yaxis_title='Mood')
-                st.plotly_chart(fig, use_container_width=True)
-            with tab2:
-                personality_scores = pd.json_normalize(df['personality_scores'].apply(json.loads))
-                st.line_chart(personality_scores)
-            with tab3:
-                phase_counts = df['story_phase'].value_counts()
-                st.bar_chart(phase_counts)
-                
-        except Exception as e:
-            st.error(f"Error displaying analytics: {str(e)}")
-            return
+    # --- Prepare Data for Visualization ---
+
+    # Define the 10 core emotions and their plotting order
+    core_emotions = ['joy', 'anticipation', 'trust', 'surprise', 'neutral', 'confusion', 'fear', 'sadness', 'disgust', 'anger']
+    emotion_to_num = {emotion: i for i, emotion in enumerate(core_emotions)}
+    num_to_emotion = {i: emotion for i, emotion in enumerate(core_emotions)}
+
+    # Create DataFrame for plotting
+    plot_data = []
+    all_turns = sorted(list(set(character_mood_arc.keys()) | set(user_mood_arc.keys())))
+
+    for turn in all_turns:
+        char_mood = character_mood_arc.get(turn)
+        user_mood = user_mood_arc.get(turn)
+        has_error = turn in validation_errors
+
+        plot_data.append({
+            'turn': turn,
+            'character_mood': char_mood.lower() if char_mood else None,
+            'user_mood': user_mood.lower() if user_mood else None,
+            'character_mood_num': emotion_to_num.get(char_mood.lower() if char_mood else None, None),
+            'user_mood_num': emotion_to_num.get(user_mood.lower() if user_mood else None, None),
+            'has_error': has_error
+        })
+
+    df_plot = pd.DataFrame(plot_data).dropna(subset=['character_mood_num', 'user_mood_num'], how='all')
+    df_plot = df_plot.sort_values('turn').reset_index(drop=True)
+
+    if df_plot.empty:
+        st.error("No valid mood data points to plot.")
+        return
+
+    # --- Generate Ideal Character Mood Arc Data ---
+    ideal_arc_data = []
+    # This is a simplified interpretation based on flexible phases and aiming for target emotion
+    # It assumes a general progression towards the target emotion.
+    # A more complex ideal arc would require more detailed rules.
+    initial_mood = df_plot['character_mood'].iloc[0] if not df_plot.empty else 'neutral'
+
+    for turn in all_turns:
+        ideal_mood = initial_mood # Default
+        # Simple logic: stay in initial category, move towards target category, reach target emotion
+        initial_category = emotional_validator.emotion_categories.get(initial_mood, 'neutral')
+        target_category = emotional_validator.emotion_categories.get(target_emotion, 'neutral')
+
+        # Placeholder for more sophisticated ideal arc logic
+        # For now, let's just aim to show a general trend towards the target emotion's 'num' value
+        ideal_mood_num = emotion_to_num.get(initial_mood, emotion_to_num.get('neutral'))
+
+        # Simple linear progression towards target emotion's numerical value across turns
+        if len(all_turns) > 1:
+            initial_num = emotion_to_num.get(initial_mood, emotion_to_num.get('neutral'))
+            target_num = emotion_to_num.get(target_emotion, emotion_to_num.get('neutral'))
+            # Interpolate linearly
+            ideal_mood_num = initial_num + (target_num - initial_num) * (turn / (max(all_turns) if max(all_turns) > 0 else 1))
+            # Find the closest emotion number
+            closest_num = min(num_to_emotion.keys(), key=lambda x:abs(x - ideal_mood_num))
+            ideal_mood = num_to_emotion.get(closest_num)
+
+        ideal_arc_data.append({'turn': turn, 'ideal_mood_num': emotion_to_num.get(ideal_mood, emotion_to_num.get('neutral'))})
+
+    df_ideal = pd.DataFrame(ideal_arc_data).sort_values('turn').reset_index(drop=True)
+
+    # --- Plotting ---
+    import plotly.graph_objects as go
+
+    fig = go.Figure()
+
+    # Character Mood Trace
+    fig.add_trace(go.Scatter(
+        x=df_plot['turn'],
+        y=df_plot['character_mood_num'],
+        mode='lines+markers',
+        name='Character Mood',
+        text=df_plot['character_mood'].str.capitalize(),
+        marker=dict(
+            color=df_plot['has_error'].apply(lambda x: 'red' if x else 'blue'),
+            size=10
+        ),
+        hovertemplate='Character: %{text}<br>Turn: %{x}<br>Error: %{customdata}<extra></extra>',
+        customdata=df_plot['turn'].apply(lambda turn: validation_errors.get(turn, 'None')) # Add error message to hover
+    ))
+
+    # User Mood Trace
+    fig.add_trace(go.Scatter(
+        x=df_plot['turn'],
+        y=df_plot['user_mood_num'],
+        mode='lines+markers',
+        name='User Mood (Model)',
+        text=df_plot['user_mood'].str.capitalize(),
+        marker=dict(color='green', size=10),
+        hovertemplate='User: %{text}<br>Turn: %{x}<extra></extra>'
+    ))
+
+    # Ideal Character Mood Trace
+    fig.add_trace(go.Scatter(
+        x=df_ideal['turn'],
+        y=df_ideal['ideal_mood_num'],
+        mode='lines',
+        name='Ideal Character Mood (Conceptual)',
+        line=dict(color='gray', dash='dot'),
+        hovertemplate='Ideal: %{y}<br>Turn: %{x}<extra></extra>'
+    ))
+
+    # Update y-axis to show emotion names
+    fig.update_layout(
+        yaxis=dict(
+            tickvals=list(num_to_emotion.keys()),
+            ticktext=[emotion.capitalize() for emotion in num_to_emotion.values()]
+        ),
+        title='Emotional Progression and Validation',
+        xaxis_title='Turn Number',
+        yaxis_title='Mood',
+        hovermode='closest'
+    )
+
+    st.plotly_chart(fig, use_container_width=True)
+
+    # Display validation errors separately
+    if validation_errors:
+        st.markdown("**Validation Errors:**")
+        for turn, error in validation_errors.items():
+            st.error(f"Turn {turn + 1}: {error}")
+
+    # Keep other analytics for now
+    # --- PERSONALITY CHANGES ---
+    try:
+        if story_state.get("user_preferences") and len(story_state["character_mood_arc"]) > 1:
+             # Reconstruct personality score history from session state or saved data if available
+             # For now, we only have the final preferences in session state, need to save history per turn
+             # Skipping personality chart for now until history is saved.
+             pass # Placeholder
+
+    except Exception as e:
+         st.warning(f"Could not display personality changes: {str(e)}")
+
+    # --- STORY PHASES ---
+    try:
+        if character_mood_arc:
+             phase_counts = pd.Series([emotional_validator.get_phase_for_turn(turn, total_turns) for turn in character_mood_arc.keys()]).value_counts()
+             if not phase_counts.empty:
+                  st.markdown("**Story Phases:**")
+                  st.bar_chart(phase_counts)
+             else:
+                 st.info("No story phase data to display.")
+
+    except Exception as e:
+         st.warning(f"Could not display story phases: {str(e)}")
 
 # Function to play a turn of the story
 def play_turn(final=False):
-    prompt = build_prompt(final=final)
+    """Play a single turn of the story"""
+    if "story_state" not in st.session_state:
+        st.error("Please start a new story first!")
+        return False
+
+    story_state = st.session_state.story_state
+    current_turn = story_state["turn_count"]
+    total_turns = story_state["total_turns"]
+    
+    # Determine if this turn should be final based on reaching target emotion (for Long stories)
+    is_final_turn = final or (story_state.get("story_length_option") == "Long (up to 25 turns, aims for target emotion)" and story_state.get("character_mood", "").lower() == story_state["target_emotion"].lower() and current_turn >= story_state["total_turns"] // 2)
+
+    # Build the prompt
+    prompt = build_prompt(final=is_final_turn)
     raw_response = openai_call(prompt)
     
     if raw_response:
@@ -903,57 +983,64 @@ def play_turn(final=False):
         summary = parts[2].strip()
         character_mood = parts[3].strip().replace("Current character mood: ", "").strip()
         user_mood = parts[4].strip().replace("Current user mood: ", "").strip()
-        personality_scores = parts[5].strip().replace("Updated personality scores:", "").strip()
-        
-        # Parse and update personality scores with more robust error handling
+        personality_scores_text = parts[5].strip().replace("Updated personality scores:", "").strip()
+
+        # Store paragraph and question in session state
+        st.session_state.story_paragraphs.append(story_output)
+        if not is_final_turn:
+            st.session_state.story_questions.append(question)
+
+        # --- Data Collection and Validation ---        
+        # Store moods in the arc dictionaries
+        st.session_state.story_state['character_mood_arc'][current_turn] = character_mood
+        st.session_state.story_state['user_mood_arc'][current_turn] = user_mood
+
+        # Parse personality scores
+        parsed_personality_scores = st.session_state.story_state['user_preferences'].copy() # Start with existing
         try:
-            for line in personality_scores.split('\n'):
+            for line in personality_scores_text.split('\n'):
                 line = line.strip()
                 if ':' in line:
                     trait, score = line.split(':', 1)
                     trait = trait.strip().lower().replace(' ', '_')
                     try:
                         score = int(score.strip().split('/')[0])
-                        if trait in st.session_state.story_state['user_preferences']:
-                            st.session_state.story_state['user_preferences'][trait] = score
+                        if trait in parsed_personality_scores:
+                            parsed_personality_scores[trait] = score
                     except ValueError:
-                        continue  # Skip invalid score formats
+                        print(f"Debug: Could not parse personality score for line: {line}")
         except Exception as e:
-            # Log the error but don't show it to the user
-            print(f"Personality score parsing error: {e}\nRaw scores: {personality_scores}")
-            # Keep existing personality scores instead of showing an error
+             print(f"Debug: Error parsing personality scores: {e}\nRaw scores: {personality_scores_text}")
+        
+        # Update session state personality scores
+        st.session_state.story_state['user_preferences'] = parsed_personality_scores
 
-        # Store paragraph and question in session state
-        st.session_state.story_paragraphs.append(story_output)
-        if not final:
-            st.session_state.story_questions.append(question)
+        # Validate the character turn and emotional progression
+        validation_error = emotional_validator.validate_turn(
+            turn_number=current_turn,
+            character_mood_arc=st.session_state.story_state['character_mood_arc'],
+            # We will pass the whole arc to the validator now
+            story_phase="beginning" if current_turn < total_turns // 3 else "middle" if current_turn < (total_turns * 2) // 3 else "climax",
+            personality_scores=list(st.session_state.story_state['user_preferences'].values()),
+            is_final=is_final_turn
+        )
+        
+        if validation_error:
+            st.session_state.story_state['validation_errors'][current_turn] = validation_error
+            st.warning(f"Validation Warning (Turn {current_turn + 1}): {validation_error}")
 
-        # Only update moods if there was user input (i.e., not the first turn)
-        if st.session_state.story_state['last_user_input'] is not None:
-            st.session_state.story_state['character_mood'] = character_mood
-            st.session_state.story_state['user_mood'] = user_mood
-
+        # Update summary and turn count
         if summary:
             st.session_state.story_state['summary'].append(summary)
         st.session_state.story_state['turn_count'] += 1
         
-        # Collect emotional data for this turn
-        emotional_data = {
-            "turn_number": st.session_state.story_state['turn_count'],
-            "character_mood": character_mood if st.session_state.story_state['last_user_input'] is not None else None,
-            "user_mood": user_mood if st.session_state.story_state['last_user_input'] is not None else None,
-            "story_summary": summary,
-            "question": question,
-            "personality_scores": st.session_state.story_state['user_preferences'].copy(),
-            "story_phase": "beginning" if st.session_state.story_state['turn_count'] < st.session_state.story_state['total_turns'] // 3 
-                          else "middle" if st.session_state.story_state['turn_count'] < (st.session_state.story_state['total_turns'] * 2) // 3 
-                          else "climax",
-            "is_final": final
-        }
-        
-        # Save emotional data
-        save_emotional_data(emotional_data)
-        
+        # Collect emotional data for this turn (will be saved later or all at once at the end)
+        # For now, just focus on saving the arc and errors in session state
+
+        # Set completed flag if it's the final turn
+        if is_final_turn:
+             st.session_state.story_state["completed"] = True
+
         return True
     return False
 
@@ -977,13 +1064,14 @@ if st.session_state.story_state["started"]:
     for i, para in enumerate(st.session_state.story_paragraphs):
         st.markdown(f'<div class="story-text">{para}</div>', unsafe_allow_html=True)
     
-    # If we've reached the end, play the final turn
-    if st.session_state.story_state["turn_count"] >= st.session_state.story_state["total_turns"]:
+    # If we've reached the end, play the final turn or complete
+    if st.session_state.story_state["turn_count"] >= st.session_state.story_state["total_turns"] or st.session_state.story_state.get("completed", False):
         if "completed" not in st.session_state.story_state:
-            # Play final turn and mark as completed
-            play_turn(final=True)
+             # Mark as completed and play final turn if not already final
             st.session_state.story_state["completed"] = True
-            st.rerun()  # Rerun to show the final paragraph
+            if st.session_state.story_state["turn_count"] < st.session_state.story_state["total_turns"]:
+                 play_turn(final=True)
+            st.rerun()  # Rerun to show the final paragraph and analytics
         else:
             # Show completion message and options
             st.success("🌟 Story complete!")
@@ -992,40 +1080,17 @@ if st.session_state.story_state["started"]:
             col1, col2 = st.columns(2)
             
             with col1:
-                if st.button("Leave Feedback"):
+                if st.button("Leave Feedback"): # Assuming this button navigates away or opens a modal
+                    # Replace with actual feedback link or modal trigger
                     st.markdown('<meta http-equiv="refresh" content="0;url=https://7umut23yse8.typeform.com/to/bSuQeV0L">', unsafe_allow_html=True)
             
             with col2:
                 if st.button("Start a new story"):
-                    # Reset all session state
-                    st.session_state.story_state = {
-                        "genre": None,
-                        "name": None,
-                        "pronouns": None,
-                        "age": None,
-                        "current_emotion": None,
-                        "target_emotion": None,
-                        "summary": [],
-                        "turn_count": 0,
-                        "total_turns": 5,
-                        "started": False,
-                        "character_mood": None,
-                        "user_mood": None,
-                        "last_user_input": None,
-                        "user_preferences": {
-                            "risk_taker": 0,
-                            "optimism": 0,
-                            "social": 0,
-                            "analytical": 0,
-                            "fantasy_interest": 0,
-                            "introspective": 0
-                        }
-                    }
-                    st.session_state.story_paragraphs = []
-                    st.session_state.story_questions = []
-                    st.session_state.choice_patterns = []
+                    # Reset all session state to start a new story
+                    for key in st.session_state.keys():
+                        del st.session_state[key]
                     st.rerun()
-    
+
     # Continue with the next turn after user input
     elif st.session_state.story_state["turn_count"] > 0:
         # Display the most recent question
@@ -1035,13 +1100,13 @@ if st.session_state.story_state["started"]:
             if user_response:
                 # Store the user's response
                 st.session_state.story_state['last_user_input'] = user_response
-                
+
                 # Analyze the user's response to update preferences
                 analyze_user_choice(user_response, st.session_state.story_questions[-1])
-                
+
                 # Add the response to the story summary
                 st.session_state.story_state['summary'].append(f"{st.session_state.story_state['name']} reflected: {user_response}")
-                
+
                 # Generate next paragraph
                 turn_complete = play_turn()
                 st.rerun()
