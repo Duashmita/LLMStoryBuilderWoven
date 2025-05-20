@@ -852,19 +852,6 @@ def display_emotional_analytics():
             with tab3:
                 phase_counts = df['story_phase'].value_counts()
                 st.bar_chart(phase_counts)
-            # --- PROLOG EXPORT ---
-            st.markdown('#### Download for Prolog Validation')
-            prolog_facts = []
-            for i, row in df.iterrows():
-                prolog_facts.append(f"turn({row['turn_number']}, {str(row['character_mood']).lower()}, {str(row['story_phase']).lower()}).")
-            prolog_export = '\n'.join(prolog_facts)
-            st.download_button(
-                label="Download Character Mood Progression for Prolog",
-                data=prolog_export,
-                file_name=f"character_mood_progression_{st.session_state.story_state['name']}.pl",
-                mime="text/plain"
-            )
-            st.info('''To validate the character mood arc, load this file in SWI-Prolog along with your validator and run:\n?- validate_character_arc.\n''')
 
 def save_research_email(story_id, email):
     """Save research email to Supabase"""
