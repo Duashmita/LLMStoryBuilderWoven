@@ -1,6 +1,6 @@
 import streamlit as st
 import google.generativeai as genai
-from dotenv import load_dotenv
+import openai
 import os
 import time
 import json
@@ -8,6 +8,17 @@ from datetime import datetime
 import pandas as pd
 from supabase import create_client, Client
 from emotional_validator import EmotionalValidator
+
+# Initialize OpenAI client
+openai.api_key = st.secrets["openai"]["api_key"]
+
+# Initialize Gemini client
+api_key = st.secrets["gemini"]["api_key"]
+genai.configure(api_key=api_key)
+model = genai.GenerativeModel('gemini-2.0-flash-lite-preview')
+
+# Initialize the emotional validator
+emotional_validator = EmotionalValidator()
 
 def init_supabase():
     """Initialize Supabase client"""
@@ -180,42 +191,34 @@ def analyze_user_choice(choice, question):
         
     return st.session_state.story_state["user_preferences"]
 
-api_key = st.secrets["gemini"]["api_key"]
-genai.configure(api_key=api_key)
-
-# Initialize Gemini client
-model = genai.GenerativeModel('gemini-2.0-flash-lite-preview')
-
-# Initialize the emotional validator
-emotional_validator = EmotionalValidator()
-
 # Session state for tracking story progress and user input
 if "story_state" not in st.session_state:
     st.session_state.story_state = {
         "genre": None,
         "name": None,
-        "pronouns": None,  # Add pronouns
-        "age": None,      # Add age
+        "pronouns": None,
+        "age": None,
         "current_emotion": None,
         "target_emotion": None,
         "summary": [],
         "turn_count": 0,
-        "total_turns": 10, # Default to short
+        "total_turns": 10,
         "started": False,
-        "character_mood": None,  # Track character's current mood (will be replaced by arc)
-        "user_mood": None,      # Track user's current mood (will be replaced by arc)
-        "last_user_input": None,  # Add field to store last user input
+        "character_mood": None,
+        "user_mood": None,
+        "last_user_input": None,
         "user_preferences": {
-            "risk_taker": 0,       # -5 to 5 scale (cautious to adventurous)
-            "optimism": 0,         # -5 to 5 scale (pessimistic to optimistic)
-            "social": 0,           # -5 to 5 scale (solitary to social)
-            "analytical": 0,       # -5 to 5 scale (intuitive to analytical)
-            "fantasy_interest": 0, # -5 to 5 scale (realistic to fantastical)
-            "introspective": 0     # -5 to 5 scale (action-oriented to introspective)
+            "risk_taker": 0,
+            "optimism": 0,
+            "social": 0,
+            "analytical": 0,
+            "fantasy_interest": 0,
+            "introspective": 0
         },
-        "character_mood_arc": {}, # Store character moods by turn
-        "user_mood_arc": {},      # Store user moods by turn
-        "validation_errors": {}   # Store validation errors by turn
+        "character_mood_arc": {},
+        "user_mood_arc": {},
+        "validation_errors": {},
+        "model_choice": "gemini"  # Add model choice to session state
     }
 
 # Add this to store all paragraphs
@@ -382,6 +385,14 @@ if not st.session_state.story_state["started"]:
         genre = st.selectbox("Choose your genre", list(GENRE_IMAGES.keys()))
         current_emotion = st.text_input("How do you feel right now?")
         target_emotion = st.text_input("What do you want to feel?")
+        
+        # Add model selection
+        model_choice = st.radio(
+            "Choose your AI model",
+            ["Gemini", "OpenAI"],
+            help="Gemini is faster but OpenAI may provide more nuanced responses"
+        )
+        
         # Story length selection
         story_length = st.radio(
             "How long do you want your story to be?",
@@ -389,13 +400,16 @@ if not st.session_state.story_state["started"]:
             index=0,
             help="Select 'Long' for a better experience with emotional arc validation."
         )
-        turns_map = {"Short (approx. 10 turns)": 10, "Long (up to 17 turns, Has better results)": 17}
+        turns_map = {
+            "Short (approx. 10 turns)": 10,
+            "Long (up to 17 turns, aims for target emotion)": 17
+        }
         turns = turns_map[story_length]
         
         # Optional email input for research updates
         research_email = st.text_input("Optional: Your email if you'd like to know more about the research", key="research_email")
         
-        submit_button = st.form_submit_button("Submit")
+        submit_button = st.form_submit_button("Start Your Story")
         
         if submit_button:
             if name and pronouns and age and genre and current_emotion and target_emotion:
@@ -409,6 +423,7 @@ if not st.session_state.story_state["started"]:
                     "total_turns": turns,
                     "turn_count": 0,
                     "started": True,
+                    "model_choice": model_choice.lower(),
                     "user_preferences": {
                         "risk_taker": 0,
                         "optimism": 0,
@@ -441,14 +456,31 @@ if not st.session_state.story_state["started"]:
             else:
                 st.error("Please fill out all fields before continuing.")
 
-def openai_call(prompt):
+def openai_call(prompt, model_choice="gemini"):
+    """Make API call to either OpenAI or Gemini based on user choice"""
     retries = 5
     base_wait = 2
     
+    # Add system message for both models
+    system_message = "You are a creative storytelling assistant that helps users write emotional stories. You MUST follow the exact output format specified in the prompt, including all sections separated by ~~~~."
+    
     for attempt in range(retries):
         try:
-            response = model.generate_content(prompt)
-            return response.text
+            if model_choice == "openai":
+                response = openai.chat.completions.create(
+                    model="gpt-4-turbo-preview",
+                    messages=[
+                        {"role": "system", "content": system_message},
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.7
+                )
+                return response.choices[0].message.content
+            else:  # gemini
+                # Add system message to the prompt for Gemini
+                full_prompt = f"{system_message}\n\n{prompt}"
+                response = model.generate_content(full_prompt)
+                return response.text
         except Exception as e:
             error_msg = str(e)
             if "429" in error_msg:
@@ -457,10 +489,10 @@ def openai_call(prompt):
                 st.warning(f"Attempt {attempt + 1}/{retries}. Waiting {wait_time} seconds...")
                 time.sleep(wait_time)
             else:
-                st.error(f"Error calling Gemini API: {error_msg}")
+                st.error(f"Error calling {model_choice.upper()} API: {error_msg}")
                 return None
     
-    st.error("Failed to get response after multiple retries. Please try again later.")
+    st.error(f"Failed to get response after multiple retries. Please try again later.")
     return None
 
 # Function to display personality scores
@@ -792,6 +824,19 @@ def display_emotional_analytics():
 
     st.subheader("Emotional Journey Analytics")
 
+    # Add model comparison section
+    st.subheader("Model Comparison")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        st.write("Current Model:", st.session_state.story_state["model_choice"].upper())
+    
+    with col2:
+        if st.button("Compare with Other Model"):
+            other_model = "openai" if st.session_state.story_state["model_choice"] == "gemini" else "gemini"
+            st.session_state.story_state["model_choice"] = other_model
+            st.rerun()
+
     story_state = st.session_state.story_state
     character_mood_arc = story_state.get("character_mood_arc", {})
     user_mood_arc = story_state.get("user_mood_arc", {})
@@ -968,7 +1013,7 @@ def play_turn(final=False):
 
     # Build the prompt
     prompt = build_prompt(final=is_final_turn)
-    raw_response = openai_call(prompt)
+    raw_response = openai_call(prompt, model_choice=story_state["model_choice"])
     
     if raw_response:
         # Split response into parts, handling potential missing delimiters
@@ -978,11 +1023,16 @@ def play_turn(final=False):
         while len(parts) < 6:
             parts.append("")
         
+        # Extract and clean each part
         story_output = parts[0].strip()
         question = parts[1].strip() if parts[1].strip() else "What are you feeling in this moment?"
         summary = parts[2].strip()
-        character_mood = parts[3].strip().replace("Current character mood: ", "").strip()
-        user_mood = parts[4].strip().replace("Current user mood: ", "").strip()
+        
+        # Clean mood strings
+        character_mood = parts[3].strip().replace("Current character mood:", "").strip()
+        user_mood = parts[4].strip().replace("Current user mood:", "").strip()
+        
+        # Clean personality scores
         personality_scores_text = parts[5].strip().replace("Updated personality scores:", "").strip()
 
         # Store paragraph and question in session state
@@ -1019,7 +1069,6 @@ def play_turn(final=False):
         validation_error = emotional_validator.validate_turn(
             turn_number=current_turn,
             character_mood_arc=st.session_state.story_state['character_mood_arc'],
-            # We will pass the whole arc to the validator now
             story_phase="beginning" if current_turn < total_turns // 3 else "middle" if current_turn < (total_turns * 2) // 3 else "climax",
             personality_scores=list(st.session_state.story_state['user_preferences'].values()),
             is_final=is_final_turn
@@ -1034,9 +1083,6 @@ def play_turn(final=False):
             st.session_state.story_state['summary'].append(summary)
         st.session_state.story_state['turn_count'] += 1
         
-        # Collect emotional data for this turn (will be saved later or all at once at the end)
-        # For now, just focus on saving the arc and errors in session state
-
         # Set completed flag if it's the final turn
         if is_final_turn:
              st.session_state.story_state["completed"] = True
