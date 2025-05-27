@@ -1082,7 +1082,7 @@ def play_turn(final=False):
         if summary:
             st.session_state.story_state['summary'].append(summary)
         st.session_state.story_state['turn_count'] += 1
-        
+
         # Set completed flag if it's the final turn
         if is_final_turn:
              st.session_state.story_state["completed"] = True

@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Woven: Into Your Story</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app-container">
+        <header class="main-header">
+            <h1>Woven: Into Your Story</h1>
+        </header>
+
+        <main>
+            {% if not story_started %}
+            {% if error %}
+            <div class="error-box">
+                <p>{{ error }}</p>
+            </div>
+            {% endif %}
+
+            <!-- Instructions Section -->
+            <div class="instructions-box">
+                <h3>How it Works</h3>
+                <p>Welcome to Woven! This is an AI-powered emotional storytelling experience. You'll start a story by providing some basic details and your current/target emotions. The AI will write the beginning of the story and ask you a question. Your response will influence the story's direction and your character's personality arc. The goal is to guide the story towards your target emotion.</p>
+                <p>Your story personality traits (like Risk Taker, Optimism, etc.) will evolve based on your choices and responses. You can see these change in the sidebar as you play.</p>
+                <p>Data from your story (progress, moods, personality scores) is collected for research to improve AI narrative and emotional understanding. See the form notice for details on opting out.</p>
+            </div>
+
+            <form id="storyForm" class="story-form" method="POST" action="{{ url_for('start_story') }}">
+                <div class="form-group">
+                    <label for="name">What is your name?</label>
+                    <input type="text" id="name" name="name" required value="{{ default_values.name if default_values else '' }}">
+                </div>
+
+                <div class="form-group">
+                    <label for="pronouns">What are your pronouns?</label>
+                    <select id="pronouns" name="pronouns" required>
+                        <option value="they/them" {% if default_values and default_values.pronouns == 'they/them' %}selected{% endif %}>they/them</option>
+                        <option value="she/her" {% if default_values and default_values.pronouns == 'she/her' %}selected{% endif %}>she/her</option>
+                        <option value="he/him" {% if default_values and default_values.pronouns == 'he/him' %}selected{% endif %}>he/him</option>
+                        <option value="she/they" {% if default_values and default_values.pronouns == 'she/they' %}selected{% endif %}>she/they</option>
+                        <option value="he/they" {% if default_values and default_values.pronouns == 'he/they' %}selected{% endif %}>he/they</option>
+                        <option value="other" {% if default_values and default_values.pronouns == 'other' %}selected{% endif %}>other</option>
+                    </select>
+                    <div id="otherPronouns" class="hidden">
+                        <input type="text" name="custom_pronouns" placeholder="Please specify your pronouns">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="age">What is your age?</label>
+                    <input type="number" id="age" name="age" min="13" max="100" value="{{ default_values.age if default_values else '25' }}" required>
+                </div>
+
+                <div class="form-group">
+                    <label for="genre">Choose your genre</label>
+                    <select id="genre" name="genre" required>
+                        <option value="fantasy" {% if default_values and default_values.genre == 'fantasy' %}selected{% endif %}>Fantasy</option>
+                        <option value="mystery" {% if default_values and default_values.genre == 'mystery' %}selected{% endif %}>Mystery</option>
+                        <option value="dreamlike" {% if default_values and default_values.genre == 'dreamlike' %}selected{% endif %}>Dreamlike</option>
+                        <option value="sci-fi" {% if default_values and default_values.genre == 'sci-fi' %}selected{% endif %}>Sci-Fi</option>
+                        <option value="horror" {% if default_values and default_values.genre == 'horror' %}selected{% endif %}>Horror</option>
+                        <option value="romance" {% if default_values and default_values.genre == 'romance' %}selected{% endif %}>Romance</option>
+                        <option value="comedy" {% if default_values and default_values.genre == 'comedy' %}selected{% endif %}>Comedy</option>
+                        <option value="adventure" {% if default_values and default_values.genre == 'adventure' %}selected{% endif %}>Adventure</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="current_emotion">How do you feel right now?</label>
+                    <input type="text" id="current_emotion" name="current_emotion" required value="{{ default_values.current_emotion if default_values else '' }}">
+                </div>
+
+                <div class="form-group">
+                    <label for="target_emotion">What do you want to feel?</label>
+                    <input type="text" id="target_emotion" name="target_emotion" required value="{{ default_values.target_emotion if default_values else '' }}">
+                </div>
+
+                <div class="form-group">
+                    <label>Choose your AI model</label>
+                    <div class="radio-group">
+                        <label>
+                            <input type="radio" name="model_choice" value="gemini" {% if not default_values or default_values.model_choice == 'gemini' %}checked{% endif %}>
+                            Gemini (Faster)
+                        </label>
+                        <label>
+                            <input type="radio" name="model_choice" value="openai" {% if default_values and default_values.model_choice == 'openai' %}checked{% endif %}>
+                            OpenAI (More nuanced)
+                        </label>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>How long do you want your story to be?</label>
+                    <div class="radio-group">
+                        <label>
+                            <input type="radio" name="story_length" value="short" {% if not default_values or default_values.story_length == 'short' %}checked{% endif %}>
+                            Short (approx. 10 turns)
+                        </label>
+                        <label>
+                            <input type="radio" name="story_length" value="long" {% if default_values and default_values.story_length == 'long' %}checked{% endif %}>
+                            Long (up to 17 turns, aims for target emotion)
+                        </label>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="research_email">Optional: Your email if you'd like to know more about the research</label>
+                    <input type="email" id="research_email" name="research_email" value="{{ default_values.research_email if default_values else '' }}">
+                </div>
+
+                <button type="submit" class="submit-button">Start Your Story</button>
+            </form>
+            {% else %}
+            <div class="story-content-container">
+                <aside class="personality-sidebar">
+                    <h3>Your Story Personality</h3>
+                    <div class="personality-scores">
+                        {% for trait, score in story_state.user_preferences.items() %}
+                        <div class="score-item">
+                            <span class="trait-name">{{ trait|replace('_', ' ')|title }}</span>
+                            <div class="score-bar">
+                                <div class="score-fill" data-score="{{ score }}"></div>
+                            </div>
+                            <span class="score-value">{{ score }}/5</span>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </aside>
+
+                <div class="story-container">
+                    <div class="story-header">
+                        <h2>{{ story_state.name }}'s {{ story_state.genre }} Story</h2>
+                    </div>
+
+                    <div class="story-content">
+                        {% for paragraph in story_paragraphs %}
+                        <div class="story-paragraph">
+                            {{ paragraph | safe }}
+                        </div>
+                        {% endfor %}
+                    </div>
+
+                    {% if not story_completed %}
+                    <div class="story-question">
+                        {{ current_question }}
+                    </div>
+
+                    <form id="responseForm" class="response-form" method="POST" action="{{ url_for('submit_response') }}">
+                        <div class="form-group">
+                            <input type="text" name="user_response" placeholder="Share your thoughts and feelings..." required>
+                        </div>
+                        <button type="submit" class="submit-button">Continue Story</button>
+                    </form>
+                    {% else %}
+                    <div class="story-complete">
+                        <h3>🌟 Story complete!</h3>
+                        <div class="completion-buttons">
+                            <a href="https://7umut23yse8.typeform.com/to/bSuQeV0L" class="button">Leave Feedback</a>
+                            <a href="{{ url_for('reset_story') }}" class="button">Start a new story</a>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+        </main>
+
+        <!-- Add instructions section -->
+        {% if not story_started %}
+        <div class="instructions-box">
+            <h3>How it Works</h3>
+            <p>Welcome to Woven! This is an AI-powered emotional storytelling experience. You'll start a story by providing some basic details and your current/target emotions. The AI will write the beginning of the story and ask you a question. Your response will influence the story's direction and your character's personality arc. The goal is to guide the story towards your target emotion.</p>
+            <p>Your story personality traits (like Risk Taker, Optimism, etc.) will evolve based on your choices and responses. You can see these change in the sidebar as you play.</p>
+            <p>Data from your story (progress, moods, personality scores) is collected for research to improve AI narrative and emotional understanding. See the form notice for details on opting out.</p>
+        </div>
+        {% endif %}
+    </div>
+
+    <script src="{{ url_for('static', filename='js/main.js') }}"></script>
+</body>
+</html> 
