@@ -7,7 +7,11 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 </head>
-<body>
+<body {% if background_url %}style="--background-image-url: url('{{ url_for('static', filename=background_url.replace('static/', '')) }}');"{% endif %}>
+    {% if story_started and story_state.current_background %}
+    <div class="fullscreen-bg"></div>
+    {% endif %}
+    
     <div class="app-container">
         <header class="main-header">
             <h1>Woven: Into Your Story</h1>
@@ -138,7 +142,7 @@
 
                     <div class="story-content">
                         {% for paragraph in story_paragraphs %}
-                        <div class="story-paragraph">
+                        <div class="story-text">
                             {{ paragraph | safe }}
                         </div>
                         {% endfor %}

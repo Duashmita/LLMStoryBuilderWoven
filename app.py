@@ -21,6 +21,98 @@ model = genai.GenerativeModel('gemini-2.0-flash-lite-preview')
 # Initialize the emotional validator
 emotional_validator = EmotionalValidator()
 
+# Define genre-specific background images
+GENRE_IMAGES = {
+    "fantasy": "https://images.unsplash.com/photo-1578662921789-ee37cd491478",
+    "mystery": "https://images.unsplash.com/photo-1555679486-e341a3e7b6de",
+    "dreamlike": "https://images.unsplash.com/photo-1534447677768-be436bb09401",
+    "sci-fi": "https://images.unsplash.com/photo-1484950763426-56b5bf172dbb",
+    "horror": "https://images.unsplash.com/photo-1476900966873-ab290e38e3f7",
+    "romance": "https://images.unsplash.com/photo-1518199266791-5375a83190b7",
+    "comedy": "https://images.unsplash.com/photo-1551948521-0c49f5c12ce1",
+    "adventure": "https://images.unsplash.com/photo-1504609773096-104ff2c73ba4"
+}
+
+def generate_background_image(story_context):
+    """Generate a background image using DALL-E based on story context"""
+    try:
+        # Create images directory if it doesn't exist
+        os.makedirs('static/images', exist_ok=True)
+        
+        # Create a more specific prompt for DALL-E
+        prompt = f"""Create a beautiful, atmospheric background image for a story scene with these specifications:
+        - Genre and mood: {story_context}
+        - Style: Digital art with soft, dreamy colors
+        - Composition: Wide landscape format suitable for a website background
+        - Lighting: Soft, atmospheric lighting
+        - Details: Subtle textures and depth
+        - No text or characters in the image
+        - Resolution: High quality, suitable for web display"""
+        
+        print("Debug - Starting image generation with prompt:", prompt)
+        
+        # Verify OpenAI API key
+        if not openai.api_key:
+            print("Debug - OpenAI API key is not set")
+            return "static/images/default.jpg"
+            
+        print("Debug - OpenAI API key is set, length:", len(openai.api_key))
+        
+        # Call DALL-E API with specific parameters
+        try:
+            print("Debug - Making DALL-E API call...")
+            response = openai.images.generate(
+                model="dall-e-3",
+                prompt=prompt,
+                size="1792x1024",
+                quality="standard",
+                n=1,
+                style="vivid"
+            )
+            print("Debug - DALL-E API response received:", response)
+            
+            # Get the image URL with additional validation
+            if response and hasattr(response, 'data') and len(response.data) > 0:
+                image_url = response.data[0].url
+                if image_url:
+                    print("Debug - Generated image URL:", image_url)
+                    
+                    # Download and save the image
+                    import requests
+                    from datetime import datetime
+                    
+                    # Generate unique filename
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    filename = f"static/images/background_{timestamp}.jpg"
+                    
+                    # Download the image
+                    response = requests.get(image_url)
+                    if response.status_code == 200:
+                        with open(filename, 'wb') as f:
+                            f.write(response.content)
+                        print("Debug - Image saved locally:", filename)
+                        return filename
+                    else:
+                        print("Debug - Failed to download image")
+                        return "static/images/default.jpg"
+                else:
+                    print("Debug - Empty image URL received from DALL-E")
+                    return "static/images/default.jpg"
+            else:
+                print("Debug - Invalid response structure from DALL-E API")
+                print("Debug - Response object:", response)
+                return "static/images/default.jpg"
+                
+        except Exception as api_error:
+            print(f"Debug - DALL-E API error: {str(api_error)}")
+            print("Debug - Full error details:", api_error.__dict__)
+            return "static/images/default.jpg"
+            
+    except Exception as e:
+        print(f"Debug - Error in generate_background_image: {str(e)}")
+        print("Debug - Full error details:", e.__dict__)
+        return "static/images/default.jpg"
+
 def init_supabase():
     """Initialize Supabase client"""
     try:
@@ -73,6 +165,10 @@ def start_story():
                                 story_started=False, 
                                 error="Please fill in all required fields")
 
+        # Generate initial background image
+        initial_context = f"Genre: {genre}. Starting emotion: {current_emotion}. Target emotion: {target_emotion}"
+        initial_background = generate_background_image(initial_context)
+
         # Initialize story state with proper types
         session['story_state'] = {
             'name': str(name),
@@ -85,6 +181,7 @@ def start_story():
             'total_turns': int(17 if story_length == 'long' else 10),
             'turn_count': 0,
             'started': True,
+            'current_background': initial_background,
             'user_preferences': {
                 'risk_taker': 0,
                 'optimism': 0,
@@ -131,7 +228,8 @@ def start_story():
                             story_paragraphs=session['story_paragraphs'],
                             story_questions=session['story_questions'],
                             current_question=session['story_questions'][-1] if session['story_questions'] else None,
-                            story_completed=session['story_state'].get('completed', False))
+                            story_completed=session['story_state'].get('completed', False),
+                            background_url=session['story_state'].get('current_background'))
 
     except Exception as e:
         print(f"Error in start_story: {str(e)}")
@@ -157,7 +255,8 @@ def submit_response():
                                 story_questions=story_questions,
                                 current_question=current_question,
                                 story_completed=story_completed,
-                                error="Please provide a response")
+                                error="Please provide a response",
+                                background_url=story_state.get('current_background'))
         
         # Get current state
         story_state = session.get('story_state', {}) 
@@ -203,7 +302,8 @@ def submit_response():
                                 story_questions=story_questions,
                                 current_question=current_question,
                                 story_completed=story_completed, 
-                                error="Failed to generate next part of the story. Please try again.")
+                                error="Failed to generate next part of the story. Please try again.",
+                                background_url=story_state.get('current_background'))
 
         return render_template('index.html',
                             story_started=True,
@@ -211,7 +311,8 @@ def submit_response():
                             story_paragraphs=story_paragraphs,
                             story_questions=story_questions,
                             current_question=current_question,
-                            story_completed=story_completed)
+                            story_completed=story_completed,
+                            background_url=story_state.get('current_background'))
     except Exception as e:
         print(f"Error in submit_response: {str(e)}")
         # Re-fetch potentially updated state even on error
@@ -227,7 +328,8 @@ def submit_response():
                             story_questions=story_questions,
                             current_question=current_question,
                             story_completed=story_completed, 
-                            error="An error occurred. Please try again.")
+                            error="An error occurred. Please try again.",
+                            background_url=story_state.get('current_background'))
 
 @app.route('/reset_story')
 def reset_story():
@@ -294,6 +396,26 @@ def play_turn(final=False):
         session['story_paragraphs'].append(story_output)
         if not is_final_turn:
             session['story_questions'].append(question)
+
+        # Generate new background image based on the story context
+        story_context = f"Genre: {story_state['genre']}. Current mood: {character_mood}. Story summary: {summary}"
+        print("Debug - Generating background for context:", story_context)
+        
+        try:
+            background_image = generate_background_image(story_context)
+            print("Debug - Generated background image URL:", background_image)
+            
+            # Store the background image URL in session state
+            story_state['current_background'] = background_image
+            print("Debug - Stored background image in session state")
+            
+            # Verify the background image was stored
+            stored_background = story_state.get('current_background')
+            print("Debug - Verified stored background:", stored_background)
+            
+        except Exception as e:
+            print(f"Debug - Error in background generation/storage: {str(e)}")
+            print("Debug - Full error details:", e.__dict__)
 
         # Store moods
         story_state['character_mood_arc'][str(current_turn)] = character_mood
@@ -605,4 +727,4 @@ def save_research_email(story_id, email):
         print(f"Error saving research email: {str(e)}")
 
 if __name__ == '__main__':
-    app.run(debug=True) 
+    app.run(debug=True, port=5001) 
