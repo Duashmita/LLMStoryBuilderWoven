@@ -438,10 +438,23 @@ def build_prompt(final=False):
     """Build the prompt for the AI model"""
     story_state = session['story_state']
     base_summary = ", ".join(story_state['summary'])
+    name = story_state['name']
+    pronouns = story_state['pronouns']
+    age = story_state['age']
+    genre = story_state['genre']
+    current_emotion = story_state['current_emotion']
+    target_emotion = story_state['target_emotion']
+    turn_count = story_state['turn_count']
+    total_turns = story_state['total_turns']
+    character_mood = story_state.get('character_mood', 'neutral')
+    user_mood = story_state.get('user_mood', 'neutral')
+    last_user_input = story_state.get('last_user_input', '')
     
-    # Build personalization string based on user preferences
-    personalization = []
+    # Get user preferences
     preferences = story_state['user_preferences']
+    
+    # Build a personalization string based on user preferences
+    personalization = []
     
     if preferences['risk_taker'] >= 3:
         personalization.append("The character is drawn to adventure and taking risks.")
@@ -473,21 +486,25 @@ def build_prompt(final=False):
     elif preferences['introspective'] <= -3:
         personalization.append("The character prefers action and practical solutions.")
     
+    # Combine the personalization insights
     personalization_string = " ".join(personalization)
     
     # Create personality score string
     personality_scores = "\n".join([f"{trait.replace('_', ' ').title()}: {score}/5" for trait, score in preferences.items()])
     
-    # Determine if fantasy elements should be introduced
+    # Determine if fantasy elements should be introduced based on player choices
     use_fantasy = preferences['fantasy_interest'] > 0
     
+    # Determine if we're approaching the final turns to prepare for the emotional breakthrough
+    approaching_climax = (turn_count >= total_turns - 2) and not final
+
     # Add last user input to the prompt if it exists
-    last_input_context = f"\nLast user response: {story_state.get('last_user_input', '')}" if story_state.get('last_user_input') else ""
+    last_input_context = f"\nLast user response: {last_user_input}" if last_user_input else ""
 
     # Determine the current phase of the story
-    story_phase = "beginning" if story_state['turn_count'] < story_state['total_turns'] // 3 else "middle" if story_state['turn_count'] < (story_state['total_turns'] * 2) // 3 else "climax"
+    story_phase = "beginning" if turn_count < total_turns // 3 else "middle" if turn_count < (total_turns * 2) // 3 else "climax"
 
-    genre_reinforce = f"This is a {story_state['genre']} story."
+    genre_reinforce = f"This is a {genre} story."
 
     # Define allowed emotions
     allowed_emotions = """
@@ -509,10 +526,10 @@ When describing moods, use ONLY these exact emotion words."""
         return f"""
 {genre_reinforce}
 Story so far: {base_summary}
-You are {story_state['name']} ({story_state['pronouns']}), a {story_state['age']}-year-old character.
-World: {story_state['genre']}.
-The character began feeling {story_state['current_emotion']} and has been experiencing a journey toward {story_state['target_emotion']}.
-The user is currently feeling {story_state.get('user_mood', 'neutral')}, try to guide them towards {story_state['target_emotion']}.{last_input_context}
+You are {name} ({pronouns}), a {age}-year-old character.
+World: {genre}.
+The character began feeling {current_emotion} and has been experiencing a journey toward {target_emotion}.
+The user is currently feeling {user_mood}, try to guide them towards {target_emotion}.{last_input_context}
 
 Character insights based on their choices:
 {personalization_string}
@@ -523,7 +540,7 @@ Current personality scores:
 {allowed_emotions}
 
 Write the FINAL part of the story:
-- Create a powerful emotional breakthrough moment that finally allows the character to fully experience {story_state['target_emotion']}
+- Create a powerful emotional breakthrough moment that finally allows the character to fully experience {target_emotion}
 - This should be a specific, concrete event (not just an internal realization)
 - The event should feel like the culmination of the character's journey
 - Show how this event transforms the character's perspective
@@ -532,7 +549,7 @@ Write the FINAL part of the story:
 - Keep it short and powerful
 - End with a sense of resolution or new beginning that feels earned
 - Use simple yet powerful words
-- Use the correct pronouns ({story_state['pronouns']})
+- Use the correct pronouns ({pronouns}) throughout the story
 - Acknowledge and build upon the user's last response in the story
 
 Structure:
@@ -546,16 +563,108 @@ Structure:
 - ~~~~
 - Updated personality scores: [list each score on a new line in the format "Trait Name: X/5"]
 """
-    else:
+    elif approaching_climax:
         return f"""
 {genre_reinforce}
 Story so far: {base_summary}
-You are {story_state['name']} ({story_state['pronouns']}), a {story_state['age']}-year-old character.
-World: {story_state['genre']}.
-The character began feeling {story_state['current_emotion']} and is on a journey that will gradually lead to feeling {story_state['target_emotion']}.
-The user is currently feeling {story_state.get('user_mood', 'neutral')}, try to guide them towards {story_state['target_emotion']}.{last_input_context}
+Main Character is {name} ({pronouns}), a {age}-year-old character.
+World: {genre}.
+The character began feeling {current_emotion} and is approaching a pivotal moment that will lead to experiencing {target_emotion}.
+The user is currently feeling {user_mood}, try to guide them towards {target_emotion}.{last_input_context}
 
 Character insights based on their choices:
+{personalization_string}
+
+Current personality scores:
+{personality_scores}
+
+{allowed_emotions}
+
+Write the next part of the story:
+- Set up the conditions for an emotional breakthrough in the next turn
+- Create a situation that challenges the character's current perspective
+- Use simple language for the story, simple and the kind of language that draws the user into the story.
+- Plant the seeds for a significant event that will transform how they feel
+- Don't rush the emotional change yet - build anticipation
+- {'Include subtle fantasy elements if they enhance the emotional journey' if use_fantasy else 'Keep the narrative grounded in human experience with a touch of wonder'}
+- Add meaningful dialogue that reveals something important
+- Tailor this part to align with the character's established preferences and tendencies
+- Use the correct pronouns ({pronouns}) throughout the story
+- Acknowledge and build upon the user's last response in the story
+- End with either:
+  * A meaningful situation that forces the character to make a significant choice
+  * A deep, personal question from another character that:
+    - Is connected to the current situation
+    - Helps the main character reflect on their journey
+    - Reveals something important about their inner world
+    - Feels natural in the conversation
+    - Leads to self-discovery
+    - Moves the story toward the emotional breakthrough
+
+Structure:
+- short paragraph
+- ~~~~
+- either a situation or a personal question that feels natural in the conversation
+- ~~~~
+- 20-word story summary
+- ~~~~
+- Current character mood: [MUST be one of the 10 allowed emotions]
+- ~~~~
+- Current user mood: [MUST be one of the 10 allowed emotions]
+- ~~~~
+- Updated personality scores: [list each score on a new line in the format "Trait Name: X/5"]
+"""
+    else:
+        # Determine the type of interaction based on story phase
+        if story_phase == "beginning":
+            interaction_type = """
+- End with either:
+  * A light, engaging situation that introduces the world and characters
+  * A simple question about preferences or observations
+  * A choice between two interesting options
+  * A chance to explore the environment
+  * A casual conversation starter
+  * A small challenge or opportunity
+  * A moment of curiosity or wonder
+  * A chance to show personality through action
+  * A simple decision that reveals character
+  * A basic interaction with another character"""
+        elif story_phase == "middle":
+            interaction_type = """
+- End with either:
+  * A situation that challenges the character's comfort zone
+  * A meaningful choice with clear consequences
+  * A conversation that reveals more about the character
+  * A moment of connection with another character
+  * A decision that affects the story's direction
+  * A question that makes the character think
+  * A small conflict or tension
+  * A moment of growth or change
+  * A situation that tests the character's values
+  * A choice that reveals priorities"""
+        else:  # climax phase
+            interaction_type = """
+- End with either:
+  * A significant situation that forces deep reflection
+  * A meaningful choice that reveals true character
+  * A conversation that touches on core values
+  * A moment that challenges beliefs
+  * A decision that affects relationships
+  * A question about personal growth
+  * A situation that tests resolve
+  * A moment of truth or realization
+  * A choice that defines character
+  * A question that leads to self-discovery"""
+
+        return f"""
+{genre_reinforce}
+Story so far: {base_summary}
+You are {name} ({pronouns}), a {age}-year-old character.
+World: {genre}.
+The character began feeling {current_emotion} and is on a journey that will gradually lead to feeling {target_emotion}.
+The user is currently feeling {user_mood}, try to guide them towards {target_emotion}.{last_input_context}
+
+Character insights based on their choices so far:
 {personalization_string}
 
 Current personality scores:
@@ -567,12 +676,13 @@ Write the next part of the story:
 - Show subtle shifts in the character's emotional state through their perceptions and actions
 - Don't explicitly mention the target emotion - create situations that move toward it indirectly
 - Use simple language for the story, simple and the kind of language that draws the user into the story.
-- {'Include subtle fantasy elements if they enhance the emotional journey' if use_fantasy else 'Keep the narrative grounded in human experience with a touch of wonder'}
+- Start with human characters in the first turn, only introducing fantasy elements if the player's choices suggest they want that.' if turn_count == 0 else ('Adjust the level of fantasy elements based on the character\'s preferences shown through their choices' if use_fantasy else 'Focus on human characters and real-world situations with authentic emotional depth.'
 - Include meaningful dialogue that reveals character and advances the emotional journey
 - Always act on user's prompt. Try to mirror the language they are using with the personality of the main character
 - Tailor the scene to align with the character's established preferences and tendencies
-- Use the correct pronouns ({story_state['pronouns']}) throughout the story
+- Use the correct pronouns ({pronouns}) throughout the story
 - Acknowledge and build upon the user's last response in the story
+{interaction_type}
 
 Structure:
 - short paragraph
