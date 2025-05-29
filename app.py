@@ -23,14 +23,14 @@ emotional_validator = EmotionalValidator()
 
 # Define genre-specific background images
 GENRE_IMAGES = {
-    "fantasy": "https://images.unsplash.com/photo-1578662921789-ee37cd491478",
-    "mystery": "https://images.unsplash.com/photo-1555679486-e341a3e7b6de",
-    "dreamlike": "https://images.unsplash.com/photo-1534447677768-be436bb09401",
-    "sci-fi": "https://images.unsplash.com/photo-1484950763426-56b5bf172dbb",
-    "horror": "https://images.unsplash.com/photo-1476900966873-ab290e38e3f7",
-    "romance": "https://images.unsplash.com/photo-1518199266791-5375a83190b7",
-    "comedy": "https://images.unsplash.com/photo-1551948521-0c49f5c12ce1",
-    "adventure": "https://images.unsplash.com/photo-1504609773096-104ff2c73ba4"
+    "fantasy": "static/backgrounds/fantasy.jpg",
+    "mystery": "static/backgrounds/mystery.jpg",
+    "dreamlike": "static/backgrounds/dreamlike.jpg",
+    "sci-fi": "static/backgrounds/scifi.jpg",
+    "horror": "static/backgrounds/horror.jpg",
+    "romance": "static/backgrounds/romance.jpg",
+    "comedy": "static/backgrounds/comedy.png",
+    "adventure": "static/backgrounds/adventure.jpg"
 }
 
 def generate_background_image(story_context):
@@ -38,6 +38,12 @@ def generate_background_image(story_context):
     try:
         # Create images directory if it doesn't exist
         os.makedirs('static/images', exist_ok=True)
+        
+        # Extract genre from story context
+        genre = story_context.split('.')[0].split(': ')[1].lower()
+        
+        # Use local image first
+        local_image = GENRE_IMAGES.get(genre, "static/backgrounds/home.jpg")
         
         # Create a more specific prompt for DALL-E
         prompt = f"""Create a beautiful, atmospheric background image for a story scene with these specifications:
@@ -54,7 +60,7 @@ def generate_background_image(story_context):
         # Verify OpenAI API key
         if not openai.api_key:
             print("Debug - OpenAI API key is not set")
-            return "static/images/default.jpg"
+            return local_image
             
         print("Debug - OpenAI API key is set, length:", len(openai.api_key))
         
@@ -81,21 +87,21 @@ def generate_background_image(story_context):
                     return image_url
                 else:
                     print("Debug - Empty image URL received from DALL-E")
-                    return "static/images/default.jpg"
+                    return local_image
             else:
                 print("Debug - Invalid response structure from DALL-E API")
                 print("Debug - Response object:", response)
-                return "static/images/default.jpg"
+                return local_image
                 
         except Exception as api_error:
             print(f"Debug - DALL-E API error: {str(api_error)}")
             print("Debug - Full error details:", api_error.__dict__)
-            return "static/images/default.jpg"
+            return local_image
             
     except Exception as e:
         print(f"Debug - Error in generate_background_image: {str(e)}")
         print("Debug - Full error details:", e.__dict__)
-        return "static/images/default.jpg"
+        return local_image
 
 def init_supabase():
     """Initialize Supabase client"""
