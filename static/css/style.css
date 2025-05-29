@@ -1,0 +1,92 @@
+/* Background Image Styles */
+.fullscreen-bg {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: -1;
+    background-size: cover;
+    background-position: center;
+    background-repeat: no-repeat;
+    transition: background-image 0.5s ease-in-out;
+}
+
+/* Genre-specific background images */
+body[data-genre="fantasy"] .fullscreen-bg {
+    background-image: url('../backgrounds/fantasy.jpg');
+}
+
+body[data-genre="mystery"] .fullscreen-bg {
+    background-image: url('../backgrounds/mystery.jpg');
+}
+
+body[data-genre="dreamlike"] .fullscreen-bg {
+    background-image: url('../backgrounds/dreamlike.jpg');
+}
+
+body[data-genre="sci-fi"] .fullscreen-bg {
+    background-image: url('../backgrounds/scifi.jpg');
+}
+
+body[data-genre="horror"] .fullscreen-bg {
+    background-image: url('../backgrounds/horror.jpg');
+}
+
+body[data-genre="romance"] .fullscreen-bg {
+    background-image: url('../backgrounds/romance.jpg');
+}
+
+body[data-genre="comedy"] .fullscreen-bg {
+    background-image: url('../backgrounds/comedy.jpg');
+}
+
+body[data-genre="adventure"] .fullscreen-bg {
+    background-image: url('../backgrounds/adventure.jpg');
+}
+
+/* Home page background */
+body:not([data-genre]) .fullscreen-bg {
+    background-image: url('../backgrounds/home.jpg');
+}
+
+/* Overlay to ensure text readability */
+.fullscreen-bg::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.4); /* Adjust opacity as needed */
+    backdrop-filter: blur(2px);
+}
+
+/* Container styles to ensure content is readable */
+.app-container {
+    position: relative;
+    z-index: 1;
+    min-height: 100vh;
+    padding: 2rem;
+}
+
+/* Blurred container styles */
+.blurred-dark-container {
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(10px);
+    border-radius: 12px;
+    padding: 1.5rem;
+    margin: 1rem 0;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .fullscreen-bg {
+        background-attachment: scroll;
+    }
+    
+    .app-container {
+        padding: 1rem;
+    }
+} 
