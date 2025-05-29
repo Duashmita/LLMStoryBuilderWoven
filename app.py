@@ -7,6 +7,7 @@ import json
 from emotional_validator import EmotionalValidator
 from supabase import create_client, Client
 import time
+import threading
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)  # Required for session management
@@ -21,52 +22,36 @@ model = genai.GenerativeModel('gemini-2.0-flash-lite-preview')
 # Initialize the emotional validator
 emotional_validator = EmotionalValidator()
 
-# Define genre-specific background images
+# Define genre-specific background images (no 'static/' prefix)
 GENRE_IMAGES = {
-    "fantasy": "static/backgrounds/fantasy.jpg",
-    "mystery": "static/backgrounds/mystery.jpg",
-    "dreamlike": "static/backgrounds/dreamlike.jpg",
-    "sci-fi": "static/backgrounds/scifi.jpg",
-    "horror": "static/backgrounds/horror.jpg",
-    "romance": "static/backgrounds/romance.jpg",
-    "comedy": "static/backgrounds/comedy.png",
-    "adventure": "static/backgrounds/adventure.jpg"
+    "fantasy": "backgrounds/fantasy.jpg",
+    "mystery": "backgrounds/mystery.jpg",
+    "dreamlike": "backgrounds/dreamlike.jpg",
+    "sci-fi": "backgrounds/scifi.jpg",
+    "horror": "backgrounds/horror.jpg",
+    "romance": "backgrounds/romance.jpg",
+    "comedy": "backgrounds/comedy.png",
+    "adventure": "backgrounds/adventure.jpg"
 }
 
-def generate_background_image(story_context):
-    """Generate a background image using DALL-E based on story context"""
-    try:
-        # Create images directory if it doesn't exist
-        os.makedirs('static/images', exist_ok=True)
-        
-        # Extract genre from story context
-        genre = story_context.split('.')[0].split(': ')[1].lower()
-        
-        # Use local image first
-        local_image = GENRE_IMAGES.get(genre, "static/backgrounds/home.jpg")
-        
-        # Create a more specific prompt for DALL-E
-        prompt = f"""Create a beautiful, atmospheric background image for a story scene with these specifications:
-        - Genre and mood: {story_context}
-        - Style: Digital art with soft, dreamy colors
-        - Composition: Wide landscape format suitable for a website background
-        - Lighting: Soft, atmospheric lighting
-        - Details: Subtle textures and depth
-        - No text or characters in the image
-        - Resolution: High quality, suitable for web display"""
-        
-        print("Debug - Starting image generation with prompt:", prompt)
-        
-        # Verify OpenAI API key
-        if not openai.api_key:
-            print("Debug - OpenAI API key is not set")
-            return local_image
-            
-        print("Debug - OpenAI API key is set, length:", len(openai.api_key))
-        
-        # Call DALL-E API with specific parameters
+IMAGE_CACHE_PATH = 'static/images/image_cache.json'
+
+def load_image_cache():
+    if os.path.exists(IMAGE_CACHE_PATH):
+        with open(IMAGE_CACHE_PATH, 'r') as f:
+            try:
+                return json.load(f)
+            except Exception:
+                return {}
+    return {}
+
+def save_image_cache(cache):
+    with open(IMAGE_CACHE_PATH, 'w') as f:
+        json.dump(cache, f)
+
+def async_generate_and_cache(prompt, cache_key):
+    def worker():
         try:
-            print("Debug - Making DALL-E API call...")
             response = openai.images.generate(
                 model="dall-e-3",
                 prompt=prompt,
@@ -75,33 +60,28 @@ def generate_background_image(story_context):
                 n=1,
                 style="vivid"
             )
-            print("Debug - DALL-E API response received:", response)
-            
-            # Get the image URL with additional validation
             if response and hasattr(response, 'data') and len(response.data) > 0:
-                image_url = response.data[0].url
-                if image_url:
-                    print("Debug - Generated image URL:", image_url)
-                    
-                    # Return the image URL directly
-                    return image_url
-                else:
-                    print("Debug - Empty image URL received from DALL-E")
-                    return local_image
-            else:
-                print("Debug - Invalid response structure from DALL-E API")
-                print("Debug - Response object:", response)
-                return local_image
-                
-        except Exception as api_error:
-            print(f"Debug - DALL-E API error: {str(api_error)}")
-            print("Debug - Full error details:", api_error.__dict__)
-            return local_image
-            
-    except Exception as e:
-        print(f"Debug - Error in generate_background_image: {str(e)}")
-        print("Debug - Full error details:", e.__dict__)
-        return local_image
+                url = response.data[0].url
+                cache = load_image_cache()
+                cache[cache_key] = url
+                save_image_cache(cache)
+        except Exception as e:
+            print(f"DALL-E error (async): {e}")
+    threading.Thread(target=worker, daemon=True).start()
+
+def generate_background_image(story_context, genre, turn_count):
+    os.makedirs('static/images', exist_ok=True)
+    # Use url_for to get the correct static URL
+    local_image = url_for('static', filename=GENRE_IMAGES.get(genre, "backgrounds/home.jpg"))
+    cache = load_image_cache()
+    cache_key = f"{genre}|{story_context}"
+    # If DALL-E image is ready, return it
+    if cache_key in cache:
+        return cache[cache_key]
+    # Otherwise, start async generation and return static image
+    prompt = f"""Create a beautiful, atmospheric background image for a story scene with these specifications:\n- Genre and mood: {story_context}\n- Style: Digital art with soft, dreamy colors\n- Composition: Wide landscape format suitable for a website background\n- Lighting: Soft, atmospheric lighting\n- Details: Subtle textures and depth\n- No text or characters in the image\n- Resolution: High quality, suitable for web display"""
+    async_generate_and_cache(prompt, cache_key)
+    return local_image
 
 def init_supabase():
     """Initialize Supabase client"""
@@ -157,7 +137,7 @@ def start_story():
 
         # Generate initial background image
         initial_context = f"Genre: {genre}. Starting emotion: {current_emotion}. Target emotion: {target_emotion}"
-        initial_background = generate_background_image(initial_context)
+        initial_background = generate_background_image(initial_context, genre, 0)
 
         # Initialize story state with proper types
         session['story_state'] = {
@@ -393,7 +373,7 @@ def play_turn(final=False):
         print("Debug - Generating background for context:", story_context)
         
         try:
-            background_image = generate_background_image(story_context)
+            background_image = generate_background_image(story_context, story_state['genre'], story_state['turn_count'])
             print("Debug - Generated background image URL:", background_image)
             
             # Store the background image URL in session state
