@@ -808,4 +808,8 @@ def save_research_email(story_id, email):
         print(f"Error saving research email: {str(e)}")
 
 if __name__ == '__main__':
-    app.run(debug=True, port=5001) 
+    # Get port from environment variable or default to 5001
+    port = int(os.environ.get('PORT', 5001))
+    # Run in production mode when deployed
+    debug = os.environ.get('FLASK_ENV') == 'development'
+    app.run(host='0.0.0.0', port=port, debug=debug) 
