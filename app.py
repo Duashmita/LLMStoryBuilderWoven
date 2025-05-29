@@ -77,24 +77,8 @@ def generate_background_image(story_context):
                 if image_url:
                     print("Debug - Generated image URL:", image_url)
                     
-                    # Download and save the image
-                    import requests
-                    from datetime import datetime
-                    
-                    # Generate unique filename
-                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    filename = f"static/images/background_{timestamp}.jpg"
-                    
-                    # Download the image
-                    response = requests.get(image_url)
-                    if response.status_code == 200:
-                        with open(filename, 'wb') as f:
-                            f.write(response.content)
-                        print("Debug - Image saved locally:", filename)
-                        return filename
-                    else:
-                        print("Debug - Failed to download image")
-                        return "static/images/default.jpg"
+                    # Return the image URL directly
+                    return image_url
                 else:
                     print("Debug - Empty image URL received from DALL-E")
                     return "static/images/default.jpg"
@@ -222,6 +206,7 @@ def start_story():
                                 error="Failed to generate story. Please try again.")
 
         # Return the story view
+        print(f"Debug - Rendering index.html with story_started: {session['story_state'].get('started')}, completed: {session['story_state'].get('completed')}")
         return render_template('index.html',
                             story_started=True,
                             story_state=session['story_state'],
