@@ -8,9 +8,43 @@ from emotional_validator import EmotionalValidator
 from supabase import create_client, Client
 import time
 import threading
+import logging
+from logging.handlers import RotatingFileHandler
+import sys
 
 app = Flask(__name__)
 app.secret_key = os.urandom(24)  # Required for session management
+
+# Configure logging
+def setup_logging():
+    """Configure logging for the application"""
+    log_format = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    
+    # File handler
+    file_handler = RotatingFileHandler(
+        'app.log',
+        maxBytes=1024 * 1024,  # 1MB
+        backupCount=5
+    )
+    file_handler.setFormatter(log_format)
+    file_handler.setLevel(logging.INFO)
+    
+    # Console handler
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(log_format)
+    console_handler.setLevel(logging.INFO)
+    
+    # Root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.INFO)
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(console_handler)
+
+# Initialize logging
+setup_logging()
+logger = logging.getLogger(__name__)
 
 # Initialize OpenAI client
 openai.api_key = os.getenv('OPENAI_API_KEY')
@@ -84,14 +118,22 @@ def generate_background_image(story_context, genre, turn_count):
     return local_image
 
 def init_supabase():
-    """Initialize Supabase client"""
+    """Initialize Supabase client with error handling"""
     try:
         url = os.getenv('SUPABASE_URL')
         key = os.getenv('SUPABASE_KEY')
+        
+        if not url or not key:
+            logger.error("Missing Supabase credentials")
+            raise ValueError("Missing Supabase credentials")
+            
         client = create_client(url, key)
+        # Test the connection
+        client.table('stories').select('id').limit(1).execute()
+        logger.info("Successfully connected to Supabase")
         return client
     except Exception as e:
-        print(f"Error initializing Supabase: {str(e)}")
+        logger.error(f"Error initializing Supabase: {str(e)}")
         raise
 
 @app.route('/')
@@ -307,6 +349,50 @@ def reset_story():
     session.clear()
     return redirect(url_for('index'))
 
+def save_story_to_supabase(story_data):
+    """Save story data to Supabase with retries"""
+    max_retries = 3
+    retry_delay = 1  # seconds
+    
+    for attempt in range(max_retries):
+        try:
+            supabase = init_supabase()
+            result = supabase.table('stories').insert(story_data).execute()
+            if result.data:
+                logger.info(f"Successfully saved story with ID: {result.data[0]['id']}")
+                return result.data[0]['id']
+            logger.error("No data returned from Supabase insert")
+            return None
+        except Exception as e:
+            logger.error(f"Error saving story to Supabase (attempt {attempt + 1}/{max_retries}): {str(e)}")
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay * (2 ** attempt))  # Exponential backoff
+            else:
+                logger.error("Failed to save story after all retries")
+                return None
+
+def update_story_in_supabase(story_id, story_data):
+    """Update existing story data in Supabase with retries"""
+    max_retries = 3
+    retry_delay = 1  # seconds
+    
+    for attempt in range(max_retries):
+        try:
+            supabase = init_supabase()
+            result = supabase.table('stories').update(story_data).eq('id', story_id).execute()
+            if result.data:
+                logger.info(f"Successfully updated story ID: {story_id}")
+                return result.data[0]
+            logger.error(f"No data returned from Supabase update for story ID: {story_id}")
+            return None
+        except Exception as e:
+            logger.error(f"Error updating story in Supabase (attempt {attempt + 1}/{max_retries}): {str(e)}")
+            if attempt < max_retries - 1:
+                time.sleep(retry_delay * (2 ** attempt))  # Exponential backoff
+            else:
+                logger.error(f"Failed to update story {story_id} after all retries")
+                return None
+
 def play_turn(final=False):
     """Play a single turn of the story"""
     try:
@@ -428,6 +514,37 @@ def play_turn(final=False):
         # Save the updated session
         session['story_state'] = story_state
         session.modified = True
+
+        # Save story data to Supabase
+        story_data = {
+            'name': story_state['name'],
+            'pronouns': story_state['pronouns'],
+            'age': story_state['age'],
+            'genre': story_state['genre'],
+            'current_emotion': story_state['current_emotion'],
+            'target_emotion': story_state['target_emotion'],
+            'model_choice': story_state['model_choice'],
+            'total_turns': story_state['total_turns'],
+            'turn_count': story_state['turn_count'],
+            'completed': story_state.get('completed', False),
+            'user_preferences': story_state['user_preferences'],
+            'character_mood_arc': story_state['character_mood_arc'],
+            'user_mood_arc': story_state['user_mood_arc'],
+            'story_paragraphs': session['story_paragraphs'],
+            'story_questions': session['story_questions'],
+            'research_email': story_state.get('research_email'),
+            'last_updated': datetime.utcnow().isoformat()
+        }
+
+        # If this is the first turn, create a new story record
+        if current_turn == 0:
+            story_id = save_story_to_supabase(story_data)
+            if story_id:
+                session['story_state']['story_id'] = story_id
+        # Otherwise, update the existing story
+        elif 'story_id' in story_state:
+            update_story_in_supabase(story_state['story_id'], story_data)
+
         return True
 
     except Exception as e:
@@ -807,9 +924,29 @@ def save_research_email(story_id, email):
     except Exception as e:
         print(f"Error saving research email: {str(e)}")
 
+@app.errorhandler(Exception)
+def handle_error(error):
+    """Global error handler"""
+    logger.error(f"Unhandled error: {str(error)}", exc_info=True)
+    return render_template('index.html',
+                         story_started=False,
+                         error="An unexpected error occurred. Please try again."), 500
+
 if __name__ == '__main__':
     # Get port from environment variable or default to 5001
     port = int(os.environ.get('PORT', 5001))
     # Run in production mode when deployed
     debug = os.environ.get('FLASK_ENV') == 'development'
+    
+    # Log startup configuration
+    logger.info(f"Starting application in {'development' if debug else 'production'} mode")
+    logger.info(f"Using port: {port}")
+    
+    # Verify environment variables
+    required_vars = ['OPENAI_API_KEY', 'GEMINI_API_KEY', 'SUPABASE_URL', 'SUPABASE_KEY']
+    missing_vars = [var for var in required_vars if not os.getenv(var)]
+    if missing_vars:
+        logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
+        sys.exit(1)
+    
     app.run(host='0.0.0.0', port=port, debug=debug) 
